@@ -1,5 +1,7 @@
 from flask.ext.sqlalchemy import SQLAlchemy
 
+from sqlalchemy.ext.associationproxy import association_proxy
+
 
 db = SQLAlchemy()
 
@@ -14,7 +16,7 @@ class Data(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # http://stackoverflow.com/questions/2659952
-    uri = db.Column(db.String(2**11))
+    uri = db.Column(db.String(2**11), unique=True)
 
     tags = db.relationship('Tag', secondary=tags,
         backref=db.backref('data', lazy='dynamic'))

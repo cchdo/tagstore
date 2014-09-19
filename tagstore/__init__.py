@@ -1,46 +1,66 @@
 from flask import Flask, jsonify, abort, request
 
+from flask.ext.restless import APIManager, ProcessingException
 
-from models import db, Tag
+
+from models import db, Tag, Data
 
 
 app = Flask(__name__)
 
 
-@app.route("/")
-def home():
-    return "tag store"
+manager = APIManager(app, flask_sqlalchemy_db=db)
 
 
-@app.route("/tags")
-def tags():
-    tags = Tag.query.all()
-    return jsonify(tags=[ttt.tag for ttt in tags])
+api_v1_prefix = '/api/v1'
 
 
-@app.route("/tag/<tag>")
-def tag(tag):
-    tag = Tag.query.filter_by(tag=tag).first()
-    if not tag:
-        abort(404)
-    # TODO return the right thing
-    return jsonify(tag.data)
+def replace_existing_tags(data):
+    """Replace any existing tags with the tag id."""
+    try:
+        tags = data['tags']
+        new_tags = [tag['tag'] for tag in tags]
+        old_tags = Tag.query.filter(Tag.tag.in_(new_tags)).all()
+        old_tag_ids = {}
+        for tag in old_tags:
+            old_tag_ids[tag.tag] = tag.id
+        for tag in tags:
+            ttt = tag['tag']
+            if ttt in old_tag_ids:
+                del tag['tag']
+                tag['id'] = old_tag_ids[ttt]
+    except KeyError:
+        pass
 
-# TODO get all data that match some tags
+
+def data_patch_single(instance_id=None, data=None, **kw):
+    replace_existing_tags(data)
 
 
-@app.route("/data", methods=['GET', 'POST'])
-def data():
-    if request.method == 'POST':
-        uri = request.form['uri']
-        tags = request.form['tags']
+def data_post(data=None, **kw):
+    try:
+        uri = data['uri']
+        old = Data.query.filter_by(uri=uri).first()
+        if old:
+            raise ProcessingException(
+                    description='Already present', code=409)
+    except KeyError:
+        pass
+    replace_existing_tags(data)
 
-        data = Data(uri)
-        data.tags = tags.split(',')
 
-        # TODO store this data!
+manager.create_api(Data, url_prefix=api_v1_prefix,
+                   preprocessors={
+                       'PATCH_SINGLE': [data_patch_single],
+                       'POST': [data_post],
+                   },
+                   methods=['GET', 'POST', 'DELETE'])
 
-        return jsonify()
+
+manager.create_api(Tag, url_prefix=api_v1_prefix,
+                   methods=['GET'],
+                   exclude_columns=['id'],
+                   collection_name='tags')
 
 
 if __name__ == "__main__":
