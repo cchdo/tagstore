@@ -54,7 +54,7 @@ manager.create_api(Data, url_prefix=api_v1_prefix,
                        'PATCH_SINGLE': [data_patch_single],
                        'POST': [data_post],
                    },
-                   methods=['GET', 'POST', 'DELETE'])
+                   methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 
 
 manager.create_api(Tag, url_prefix=api_v1_prefix,
