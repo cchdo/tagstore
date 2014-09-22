@@ -194,9 +194,9 @@ class TagStoreClient(object):
 
         """
         # If file is stored locally, delete it
-        result = self.query([u'id', u'eq', unicode(instanceid)])
-        if len(result) >= 1:
-            obj = result.next()
+        resp = requests.get(self._api_endpoint('data', unicode(instanceid)))
+        if resp.status_code == 200:
+            obj = DataResponse(self, resp.json())
             parts = urlsplit(obj.uri)
             if parts.scheme == self.OFS_SCHEME:
                 label = parts.path
