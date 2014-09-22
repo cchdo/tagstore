@@ -140,8 +140,7 @@ class TestClient(LiveServerTestCase):
         self.assertEqual(resp.status_code, 201)
 
         resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
-        result = resp.json()
-        self.assertEquals(result['num_results'], 2)
+        self.assertEquals(len(resp), 2)
 
     def test_edit(self):
         resp = self.tstore.create('aaa', [u'm', u'n'])
@@ -169,7 +168,7 @@ class TestClient(LiveServerTestCase):
 
         response = self.tstore.query(
             ['tags', 'any', ['tag', 'eq', 'format:exchange']])
-        self.assertEqual(response.json()['num_results'], 2)
+        self.assertEqual(len(response), 2)
 
     def test_delete_local_file(self):
         ccc = StringIO('ctdzipnc')
@@ -177,3 +176,14 @@ class TestClient(LiveServerTestCase):
         d_id = resp.json()['id']
 
         self.tstore.delete(d_id)
+
+    def test_query_response(self):
+        for iii in range(20):
+            self.tstore.create(u'test:{0}'.format(iii), [u'm'])
+        resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
+        self.assertEqual(len(resp), 20)
+        self.assertEqual(resp[15]['uri'], u'test:15')
+        self.assertEqual(len(resp[9:15]), 6)
+        self.assertEqual(resp[::-1][0]['uri'], u'test:19')
+        with self.assertRaises(IndexError):
+            resp[20]['uri']

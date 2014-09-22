@@ -1,4 +1,5 @@
 import os.path
+from copy import copy
 from urlparse import urlunsplit, urlsplit
 from uuid import uuid4
 
@@ -7,6 +8,61 @@ import requests
 from ofs.local import PTOFS
 
 import json
+
+
+class QueryResponse(object):
+    def __init__(self, client, params):
+        self.client = client
+        self.params = params
+
+        self.objects = []
+        self.iii = 0
+        self.page = 1
+
+        self.get_page()
+
+    def get_page(self, page=None):
+        params = copy(self.params)
+        if page is not None:
+            if page > self.num_pages:
+                raise IndexError()
+            params['page'] = page
+
+        response = requests.get(self.client._api_endpoint('data'),
+                                params=params, headers=self.client.headers_json)
+        assert response.status_code == 200
+
+        json = response.json()
+        self.objects += json['objects']
+        self.num_pages = json['total_pages']
+        self.num_results = json['num_results']
+
+    def __getitem__(self, value):
+        try:
+            return self.objects[value]
+        except IndexError:
+            self.page += 1
+            self.get_page(self.page)
+            return self[value]
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        if self.iii >= len(self.objects):
+            if self.page >= self.num_pages:
+                raise StopIteration
+            else:
+                self.page += 1
+                self.get_page(self.page)
+        self.iii += 1
+        return self.objects[self.iii - 1]
+
+    def __len__(self):
+        return self.num_results
+
+    def __repr__(self):
+        return '<QueryResponse({0})>'.format(len(self))
 
 
 class TagStoreClient(object):
@@ -88,10 +144,9 @@ class TagStoreClient(object):
     def delete(self, instanceid):
         """Delete a Datum."""
         # If file is stored locally, delete it
-        response = self.query([u'id', u'eq', unicode(instanceid)])
-        result = response.json()
-        if result['num_results'] >= 1:
-            obj = result['objects'][0]
+        result = self.query([u'id', u'eq', unicode(instanceid)])
+        if len(result) >= 1:
+            obj = result.next()
             parts = urlsplit(obj['uri'])
             if parts.scheme == self.OFS_SCHEME:
                 label = parts.path
@@ -116,10 +171,7 @@ class TagStoreClient(object):
         """
         params = dict(q=json.dumps(
             self._wrap_filters(map(self._list_to_filter, filters))))
-        response = requests.get(self._api_endpoint('data'), params=params,
-                                headers=self.headers_json)
-        assert response.status_code == 200
-        return response
+        return QueryResponse(self, params)
 
     @classmethod
     def _filter(cls, name=None, op=None, val=None):
