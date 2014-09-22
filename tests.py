@@ -123,47 +123,47 @@ class TestClient(LiveServerTestCase):
         return app
 
     def test_create(self):
-        resp = self.tstore.create('aaa', [u'm', u'n'])
-        self.assertEqual(resp.status_code, 201)
+        uri = 'aaa'
+        tags = [u'm', u'n']
+        resp = self.tstore.create(uri, tags)
+        self.assertEqual(resp.uri, uri)
+        self.assertEqual(sorted(resp.tags), sorted(tags))
 
-        resp = self.tstore.create('bbb', [u'm', u'o'])
-        self.assertEqual(resp.status_code, 201)
+        uri = 'bbb'
+        tags = [u'm', u'o']
+        resp = self.tstore.create(uri, tags)
+        self.assertEqual(resp.uri, uri)
+        self.assertEqual(sorted(resp.tags), sorted(tags))
 
         resp = self.tstore.create('aaa', [u'm', u'n'])
-        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp, None)
 
     def test_query(self):
-        resp = self.tstore.create('aaa', [u'm', u'n'])
-        self.assertEqual(resp.status_code, 201)
-
-        resp = self.tstore.create('bbb', [u'm', u'o'])
-        self.assertEqual(resp.status_code, 201)
+        self.tstore.create('aaa', [u'm', u'n'])
+        self.tstore.create('bbb', [u'm', u'o'])
 
         resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
         self.assertEquals(len(resp), 2)
 
     def test_edit(self):
         resp = self.tstore.create('aaa', [u'm', u'n'])
-        self.assertEqual(resp.status_code, 201)
 
-        d_id = resp.json()['id']
+        d_id = resp.id
 
         resp = self.tstore.edit(d_id, 'aaa', [u'n'])
-        self.assertEqual(resp.status_code, 200)
-        tags = [tag['tag'] for tag in resp.json()['tags']]
-        self.assertEqual(tags, [u'n'])
+        self.assertEqual(resp.tags, [u'n'])
 
     def test_local_file(self):
         aaa = StringIO('btlex')
-        response = self.tstore.create(aaa, [
+        self.tstore.create(aaa, [
             'cruise:1234', 'datatype:bottle', 'format:exchange', 'preliminary'])
 
         bbb = StringIO('ctdex')
-        response = self.tstore.create(bbb, [
+        self.tstore.create(bbb, [
             'cruise:1234', 'datatype:ctd', 'format:exchange'])
 
         ccc = StringIO('ctdzipnc')
-        response = self.tstore.create(ccc, [
+        self.tstore.create(ccc, [
             'cruise:1234', 'datatype:ctd', 'format:zip.netcdf'])
 
         response = self.tstore.query(
@@ -172,9 +172,8 @@ class TestClient(LiveServerTestCase):
 
     def test_delete_local_file(self):
         ccc = StringIO('ctdzipnc')
-        resp = self.tstore.create(ccc, [])
-        d_id = resp.json()['id']
-
+        resp = self.tstore.create(ccc)
+        d_id = resp.id
         self.tstore.delete(d_id)
 
     def test_query_response(self):
@@ -182,8 +181,8 @@ class TestClient(LiveServerTestCase):
             self.tstore.create(u'test:{0}'.format(iii), [u'm'])
         resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
         self.assertEqual(len(resp), 20)
-        self.assertEqual(resp[15]['uri'], u'test:15')
+        self.assertEqual(resp[15].uri, u'test:15')
         self.assertEqual(len(resp[9:15]), 6)
-        self.assertEqual(resp[::-1][0]['uri'], u'test:19')
+        self.assertEqual(resp[::-1][0].uri, u'test:19')
         with self.assertRaises(IndexError):
             resp[20]['uri']

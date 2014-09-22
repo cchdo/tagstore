@@ -10,6 +10,17 @@ from ofs.local import PTOFS
 import json
 
 
+class DataResponse(object):
+    def __init__(self, json):
+        self.id = json['id']
+        self.uri = json['uri']
+        self.tags = [tag['tag'] for tag in json['tags']]
+
+    def __repr__(self):
+        return '<DataResponse({0}, {1}, {2})>'.format(self.id, self.uri,
+                                                      self.tags)
+
+
 class QueryResponse(object):
     def __init__(self, client, params):
         self.client = client
@@ -33,7 +44,7 @@ class QueryResponse(object):
         assert response.status_code == 200
 
         json = response.json()
-        self.objects += json['objects']
+        self.objects += map(DataResponse, json['objects'])
         self.num_pages = json['total_pages']
         self.num_results = json['num_results']
 
@@ -106,7 +117,7 @@ class TagStoreClient(object):
         """JSON representation of a Datum."""
         return dict(uri=uri, tags=map(self._wrap_tag, tags))
 
-    def create(self, uri_or_fobj, tags):
+    def create(self, uri_or_fobj, tags=[]):
         """Create a Datum."""
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
@@ -121,21 +132,25 @@ class TagStoreClient(object):
                                  data=json.dumps(self._data(uri, tags)),
                                  headers=self.headers_json)
         assert response.status_code in (201, 409)
-        return response
+        if response.status_code == 201:
+            return DataResponse(response.json())
+        else:
+            return None
 
-    def edit(self, instanceid, uri, tags):
+    def edit(self, instanceid, uri, tags=[]):
         """Edit a Datum."""
         response = requests.put(self._api_endpoint('data', instanceid),
                             data=json.dumps(self._data(uri, tags)),
                             headers=self.headers_json)
-        return response
+        assert response.status_code == 200
+        return DataResponse(response.json())
 
     @classmethod
     def _tagobjs_to_tags(cls, tagobjs):
         return [tagobj['tag'] for tagobj in tagobjs]
 
     @classmethod
-    def _get_tag_value(cls, tagobjs, key):
+    def get_tag_value(cls, tagobjs, key):
         for tag in cls._tagobjs_to_tags(tagobjs):
             if tag.startswith(u'{0}:'.format(key)):
                 return tag[len(key) + 1:]
@@ -147,7 +162,7 @@ class TagStoreClient(object):
         result = self.query([u'id', u'eq', unicode(instanceid)])
         if len(result) >= 1:
             obj = result.next()
-            parts = urlsplit(obj['uri'])
+            parts = urlsplit(obj.uri)
             if parts.scheme == self.OFS_SCHEME:
                 label = parts.path
                 self.ofs.del_stream(self.bucket_id, label)
@@ -155,7 +170,8 @@ class TagStoreClient(object):
                 raise BaseException(u'Cannot delete missing locally stored file')
         response = requests.delete(self._api_endpoint('data', instanceid),
                                    headers=self.headers_json)
-        return response
+        assert response.status_code == 204
+        return None
 
     def query(self, *filters):
         """Query the tag store for Data that satisfies the filters.
