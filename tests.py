@@ -11,7 +11,7 @@ from flask.ext.testing import TestCase, LiveServerTestCase
 from flask.ext.restless import ProcessingException
 
 from tagstore import app, replace_existing_tags, data_post
-from tagstore.client import TagStoreClient
+from tagstore.client import TagStoreClient, Query
 from tagstore.models import db, Tag, Data
 
 
@@ -22,6 +22,8 @@ def _create_app(self):
     db.create_all(app=app)
     return app
 
+
+API_ENDPOINT = '/api/v1'
 
 
 class BaseTest(TestCase):
@@ -70,7 +72,7 @@ class RoutedTest(BaseTest):
 
 
 class TestViews(RoutedTest):
-    api_data_endpoint = '/api/v1/data'
+    api_data_endpoint = '{0}/data'.format(API_ENDPOINT)
 
     def test_data_post(self):
         data = {'uri': 'http://example.com'}
@@ -119,7 +121,9 @@ class TestClient(LiveServerTestCase):
         app = _create_app(self)
         self.port = 8943
         app.config['LIVESERVER_PORT'] = self.port
-        self.tstore = TagStoreClient('{0}/api/v1'.format(self.get_server_url()))
+        self.FQ_API_ENDPOINT = '{0}{1}'.format(self.get_server_url(),
+                                               API_ENDPOINT)
+        self.tstore = TagStoreClient(self.FQ_API_ENDPOINT)
         return app
 
     def test_create(self):
@@ -142,7 +146,7 @@ class TestClient(LiveServerTestCase):
         self.tstore.create('aaa', [u'm', u'n'])
         self.tstore.create('bbb', [u'm', u'o'])
 
-        resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
+        resp = self.tstore.query(Query.tags_any('eq', u'm'))
         self.assertEquals(len(resp), 2)
 
     def test_edit(self):
@@ -166,8 +170,7 @@ class TestClient(LiveServerTestCase):
         self.tstore.create(ccc, [
             'cruise:1234', 'datatype:ctd', 'format:zip.netcdf'])
 
-        response = self.tstore.query(
-            ['tags', 'any', ['tag', 'eq', 'format:exchange']])
+        response = self.tstore.query(Query.tags_any('eq', 'format:exchange'))
         self.assertEqual(len(response), 2)
 
     def test_delete_local_file(self):
@@ -179,10 +182,22 @@ class TestClient(LiveServerTestCase):
     def test_query_response(self):
         for iii in range(20):
             self.tstore.create(u'test:{0}'.format(iii), [u'm'])
-        resp = self.tstore.query(['tags', 'any', ['tag', 'eq', u'm']])
+        resp = self.tstore.query(Query.tags_any('eq', u'm'))
         self.assertEqual(len(resp), 20)
         self.assertEqual(resp[15].uri, u'test:15')
         self.assertEqual(len(resp[9:15]), 6)
         self.assertEqual(resp[::-1][0].uri, u'test:19')
         with self.assertRaises(IndexError):
             resp[20]['uri']
+
+    def test_data_response(self):
+        """Reading from a Data pointing to a URL should make the request."""
+        data = self.tstore.create(self.FQ_API_ENDPOINT + '/data')
+        self.assertEqual(data.filename, 'data')
+        self.assertEqual(data.open().read(1), '{')
+
+        aaa = StringIO('hi')
+        aaa.name = 'fname.txt'
+        data = self.tstore.create(aaa)
+        self.assertEqual(data.filename, aaa.name)
+        self.assertEqual(data.open().read(2), 'hi')

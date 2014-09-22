@@ -11,10 +11,35 @@ import json
 
 
 class DataResponse(object):
-    def __init__(self, json):
+    def __init__(self, client, json):
+        self.client = client
         self.id = json['id']
         self.uri = json['uri']
         self.tags = [tag['tag'] for tag in json['tags']]
+
+    @property
+    def filename(self):
+        parts = urlsplit(self.uri)
+        if parts.scheme == TagStoreClient.OFS_SCHEME:
+            label = parts.path
+            return self.client.ofs.get_metadata(self.client.bucket_id,
+                                                label).get(u'filename', u'none')
+        else:
+            resp = requests.head(self.uri)
+            if resp.status_code == 200:
+                try:
+                    return resp.headers['content-disposition']
+                except KeyError:
+                    pass
+            return os.path.basename(parts.path)
+
+    def open(self):
+        parts = urlsplit(self.uri)
+        if parts.scheme == TagStoreClient.OFS_SCHEME:
+            label = parts.path
+            return self.client.ofs.get_stream(self.client.bucket_id, label)
+        else:
+            return requests.get(self.uri, stream=True).raw
 
     def __repr__(self):
         return '<DataResponse({0}, {1}, {2})>'.format(self.id, self.uri,
@@ -44,7 +69,7 @@ class QueryResponse(object):
         assert response.status_code == 200
 
         json = response.json()
-        self.objects += map(DataResponse, json['objects'])
+        self.objects += [DataResponse(self.client, obj) for obj in json['objects']]
         self.num_pages = json['total_pages']
         self.num_results = json['num_results']
 
@@ -124,6 +149,11 @@ class TagStoreClient(object):
             fobj = uri_or_fobj
             label = str(uuid4())
             self.ofs.put_stream(self.bucket_id, label, fobj)
+            try:
+                fname = os.path.basename(fobj.name)
+            except AttributeError:
+                fname = u'none'
+            self.ofs.update_metadata(self.bucket_id, label, {'filename': fname})
             uri = urlunsplit((self.OFS_SCHEME, '', label, None, None))
         else:
             uri = uri_or_fobj
@@ -133,7 +163,7 @@ class TagStoreClient(object):
                                  headers=self.headers_json)
         assert response.status_code in (201, 409)
         if response.status_code == 201:
-            return DataResponse(response.json())
+            return DataResponse(self, response.json())
         else:
             return None
 
@@ -143,7 +173,7 @@ class TagStoreClient(object):
                             data=json.dumps(self._data(uri, tags)),
                             headers=self.headers_json)
         assert response.status_code == 200
-        return DataResponse(response.json())
+        return DataResponse(self, response.json())
 
     @classmethod
     def _tagobjs_to_tags(cls, tagobjs):
@@ -156,8 +186,13 @@ class TagStoreClient(object):
                 return tag[len(key) + 1:]
         return None
 
-    def delete(self, instanceid):
-        """Delete a Datum."""
+    def delete(self, instanceid, force=False):
+        """Delete a Datum.
+        
+        force - delete the Datum even if stored locally and local blob is
+        missing.
+
+        """
         # If file is stored locally, delete it
         result = self.query([u'id', u'eq', unicode(instanceid)])
         if len(result) >= 1:
@@ -165,9 +200,11 @@ class TagStoreClient(object):
             parts = urlsplit(obj.uri)
             if parts.scheme == self.OFS_SCHEME:
                 label = parts.path
-                self.ofs.del_stream(self.bucket_id, label)
-            else:
-                raise BaseException(u'Cannot delete missing locally stored file')
+                try:
+                    self.ofs.del_stream(self.bucket_id, label)
+                except Exception:
+                    if not force:
+                        raise BaseException(u'Cannot delete missing locally stored file')
         response = requests.delete(self._api_endpoint('data', instanceid),
                                    headers=self.headers_json)
         assert response.status_code == 204
@@ -193,3 +230,10 @@ class TagStoreClient(object):
     def _filter(cls, name=None, op=None, val=None):
         """Shorthand to create a filter object for REST API."""
         return dict(name=name, op=op, val=val)
+
+
+class Query(object):
+    """Collection of methods to generate common queries."""
+    @classmethod
+    def tags_any(cls, op, value):
+        return ['tags', 'any', ['tag', op, value]]
