@@ -49,6 +49,7 @@ def data_post(data=None, **kw):
     replace_existing_tags(data)
 
 
+# TODO consider using the uri as a key
 manager.create_api(Data, url_prefix=api_v1_prefix,
                    preprocessors={
                        'PATCH_SINGLE': [data_patch_single],
