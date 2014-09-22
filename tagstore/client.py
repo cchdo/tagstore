@@ -1,4 +1,5 @@
 import os.path
+from urlparse import urlunsplit, urlsplit
 from uuid import uuid4
 
 import requests
@@ -8,19 +9,11 @@ from ofs.local import PTOFS
 import json
 
 
-# Monkey patch PTOFS use of PairTreeFileStorageClient
-def get_url(self, bucket, label):
-    if self.exists(bucket) and self.exists(bucket, label):
-        return os.path.join(self._store._id_to_dirpath(bucket), label)
-    else:
-        raise FileNotFoundException
-PTOFS.get_url = get_url
-
-
 class TagStoreClient(object):
     headers_json = {'Content-Type': 'application/json'}
-    BUCKET_LABEL = u'tagged'
-    STORED_LOCALLY = u'stored_locally'
+    # 2-char bucket label for shallower pairtree
+    BUCKET_LABEL = u'ts'
+    OFS_SCHEME = u'ofs'
 
     def __init__(self, endpoint, ofs=None):
         self.endpoint = endpoint
@@ -64,8 +57,7 @@ class TagStoreClient(object):
             fobj = uri_or_fobj
             label = str(uuid4())
             self.ofs.put_stream(self.bucket_id, label, fobj)
-            uri = self.ofs.get_url(self.bucket_id, label)
-            tags.append(u'{0}:{1}'.format(self.STORED_LOCALLY, label))
+            uri = urlunsplit((self.OFS_SCHEME, '', label, None, None))
         else:
             uri = uri_or_fobj
 
@@ -99,9 +91,10 @@ class TagStoreClient(object):
         response = self.query([u'id', u'eq', unicode(instanceid)])
         result = response.json()
         if result['num_results'] >= 1:
-            tagobjs = result['objects'][0]['tags']
-            label = self._get_tag_value(tagobjs, self.STORED_LOCALLY)
-            if label:
+            obj = result['objects'][0]
+            parts = urlsplit(obj['uri'])
+            if parts.scheme == self.OFS_SCHEME:
+                label = parts.path
                 self.ofs.del_stream(self.bucket_id, label)
             else:
                 raise BaseException(u'Cannot delete missing locally stored file')

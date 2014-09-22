@@ -170,3 +170,10 @@ class TestClient(LiveServerTestCase):
         response = self.tstore.query(
             ['tags', 'any', ['tag', 'eq', 'format:exchange']])
         self.assertEqual(response.json()['num_results'], 2)
+
+    def test_delete_local_file(self):
+        ccc = StringIO('ctdzipnc')
+        resp = self.tstore.create(ccc, [])
+        d_id = resp.json()['id']
+
+        self.tstore.delete(d_id)

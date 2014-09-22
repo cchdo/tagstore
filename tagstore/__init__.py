@@ -60,7 +60,7 @@ manager.create_api(Data, url_prefix=api_v1_prefix,
 
 manager.create_api(Tag, url_prefix=api_v1_prefix,
                    methods=['GET'],
-                   exclude_columns=['id'],
+                   exclude_columns=['id', 'data'],
                    collection_name='tags')
 
 
