@@ -155,17 +155,17 @@ class TagStoreClient(object):
     def edit(self, instanceid, uri_or_fobj, fname, tags=[]):
         """Edit a Datum."""
         data_endpoint = self._api_endpoint('data', unicode(instanceid))
+        resp = DataResponse(self, requests.get(data_endpoint).json())
+        uri = resp.uri
         if not isinstance(uri_or_fobj, basestring):
             # Update the file first.
             fobj = uri_or_fobj
             resp = requests.put(resp.uri, files={'blob': fobj})
             assert resp.status_code == 200
-            fname = resp.headers.get('content-type', '')
         else:
-            resp = DataResponse(self, requests.get(data_endpoint).json())
-            if resp.uri != uri_or_fobj:
+            if uri != uri_or_fobj:
                 raise ValueError(u'Attempt to update blob while changing URI.')
-        data = json.dumps(self._data(uri_or_fobj, fname, tags))
+        data = json.dumps(self._data(uri, fname, tags))
         response = requests.put(data_endpoint, data=data,
                                 headers=self.headers_json)
         assert response.status_code == 200

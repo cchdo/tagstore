@@ -1,6 +1,7 @@
 from uuid import uuid4
 import os.path
 import logging
+from mimetypes import guess_type
 
 log = logging.getLogger(__name__)
 
@@ -98,27 +99,41 @@ def ofs_create():
     return jsonify(dict(uri='{0}/{1}'.format(request.url, label), fname=fname))
 
 
+def _update_http_headers(headers, metadata):
+    fname = metadata.get('fname', '')
+    headers['Content-Disposition'] = 'inline; filename={0}'.format(fname)
+    mtype = guess_type(fname)[0]
+    if not mtype:
+        mtype = 'application/octet-stream'
+    headers['Content-Type'] = metadata.get('_format', mtype)
+    try:
+        headers['Content-Length'] = metadata['_content_length']
+    except KeyError:
+        pass
+
+
 @app.route('{0}/ofs/<label>'.format(api_v1_prefix),
            methods=['HEAD', 'GET', 'PUT', 'DELETE'])
 def ofs_get(label):
     if request.method == 'HEAD':
-        try:
-            fname = ofs.get_metadata(BUCKET_ID, label)['fname']
-        except KeyError:
-            fname = ''
-        return make_response('', 200, {'content-disposition': fname})
+        metadata = ofs.get_metadata(BUCKET_ID, label)
+        headers = {}
+        _update_http_headers(headers, metadata)
+        return make_response('', 200, headers)
     elif request.method == 'GET':
         try:
             stream = ofs.get_stream(BUCKET_ID, label)
-            fname = ofs.get_metadata(BUCKET_ID, label)['fname']
-            # Flask converts the filename to an absolute path by prepending the
-            # app directory which is incorrect. This is only used to add etags,
-            # so just turn that off.
-            return send_file(stream, as_attachment=True,
-                             attachment_filename=fname, add_etags=False)
         except Exception as err:
             log.error(u'Local blob is missing for label {0}'.format(label))
             abort(404)
+        else:
+            metadata = ofs.get_metadata(BUCKET_ID, label)
+            # Flask converts the filename to an absolute path by prepending the
+            # app directory which is incorrect. This is only used to add etags,
+            # so just turn that off.
+            resp = send_file(stream, add_etags=False)
+            _update_http_headers(resp.headers, metadata)
+            return resp
     elif request.method == 'PUT':
         fobj = request.files['blob']
         ofs.put_stream(BUCKET_ID, label, fobj)

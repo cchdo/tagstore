@@ -4,15 +4,15 @@ import logging
 from shutil import rmtree
 from urlparse import urlsplit
 
-
 log = logging.getLogger(__name__)
-
 
 from ofs.local import PTOFS
 
 from flask.ext.testing import TestCase, LiveServerTestCase
 
 from flask.ext.restless import ProcessingException
+
+import requests
 
 import tagstore
 from tagstore import app, replace_existing_tags, data_post
@@ -259,6 +259,15 @@ class TestClient(LiveServerTestCase):
 
         response = self.tstore.query(Query.tags_any('eq', 'format:exchange'))
         self.assertEqual(len(response), 2)
+
+    def test_local_file_http(self):
+        """HTTP headers should be set appropriately."""
+        aaa = StringIO('btlex')
+        resp = self.tstore.create(aaa, None, [])
+        resp = requests.get(resp.uri)
+        headers = resp.headers
+        self.assertTrue(headers['content-disposition'].endswith('blob'))
+        self.assertEqual(headers['content-length'], '5')
 
     def test_delete_local_file(self):
         ccc = StringIO('ctdzipnc')
