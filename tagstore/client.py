@@ -8,7 +8,6 @@ log = logging.getLogger(__name__)
 
 import requests
 
-from ofs.local import PTOFS
 
 import json
 
@@ -22,27 +21,16 @@ class DataResponse(object):
 
     @property
     def filename(self):
-        parts = urlsplit(self.uri)
-        if parts.scheme == TagStoreClient.OFS_SCHEME:
-            label = parts.path
-            return self.client.ofs.get_metadata(self.client.bucket_id,
-                                                label).get(u'filename', u'none')
-        else:
-            resp = requests.head(self.uri)
-            if resp.status_code == 200:
-                try:
-                    return resp.headers['content-disposition']
-                except KeyError:
-                    pass
-            return os.path.basename(parts.path)
+        resp = requests.head(self.uri)
+        if resp.status_code == 200:
+            try:
+                return resp.headers['content-disposition']
+            except KeyError:
+                pass
+        return os.path.basename(self.uri)
 
     def open(self):
-        parts = urlsplit(self.uri)
-        if parts.scheme == TagStoreClient.OFS_SCHEME:
-            label = parts.path
-            return self.client.ofs.get_stream(self.client.bucket_id, label)
-        else:
-            return requests.get(self.uri, stream=True).raw
+        return requests.get(self.uri, stream=True).raw
 
     def __repr__(self):
         return '<DataResponse({0}, {1}, {2})>'.format(self.id, self.uri,
@@ -110,20 +98,9 @@ class QueryResponse(object):
 
 class TagStoreClient(object):
     headers_json = {'Content-Type': 'application/json'}
-    # 2-char bucket label for shallower pairtree
-    BUCKET_LABEL = u'ts'
-    OFS_SCHEME = u'ofs'
 
-    def __init__(self, endpoint, ofs=None):
+    def __init__(self, endpoint):
         self.endpoint = endpoint
-        if not ofs:
-            ofs = PTOFS(storage_dir='tagstore-data', uri_base='urn:uuid:',
-                        hashing_type='sha256')
-        self.ofs = ofs
-        if self.BUCKET_LABEL not in self.ofs.list_buckets():
-            self.bucket_id = self.ofs.claim_bucket(self.BUCKET_LABEL)
-        else:
-            self.bucket_id = self.BUCKET_LABEL
 
     def _api_endpoint(self, *segments):
         return '/'.join([self.endpoint] + map(unicode, segments))
@@ -154,18 +131,16 @@ class TagStoreClient(object):
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
             fobj = uri_or_fobj
-            label = str(uuid4())
-            self.ofs.put_stream(self.bucket_id, label, fobj)
-            try:
-                fname = os.path.basename(fobj.name)
-            except AttributeError:
-                fname = None
-            uri = urlunsplit((self.OFS_SCHEME, '', label, None, None))
+
+            resp = requests.post(self._api_endpoint('ofs'), files={'blob': fobj})
+            assert resp.status_code in (200, 201)
+            uri = resp.json()['uri']
+            fname = resp.headers.get('content-type', '')
         else:
             uri = uri_or_fobj
             fname = os.path.basename(uri)
             if not fname:
-                print repr(requests.head(uri).headers)
+                fname = requests.head(uri).headers.get('content-type', '')
 
         response = requests.post(self._api_endpoint('data'),
                                  data=json.dumps(self._data(uri, fname, tags)),
@@ -176,11 +151,22 @@ class TagStoreClient(object):
         else:
             return None
 
-    def edit(self, instanceid, uri, fname, tags=[]):
+    def edit(self, instanceid, uri_or_fobj, fname, tags=[]):
         """Edit a Datum."""
-        response = requests.put(self._api_endpoint('data', instanceid),
-                            data=json.dumps(self._data(uri, fname, tags)),
-                            headers=self.headers_json)
+        data_endpoint = self._api_endpoint('data', unicode(instanceid))
+        if not isinstance(uri_or_fobj, basestring):
+            # Update the file first.
+            fobj = uri_or_fobj
+            resp = requests.put(resp.uri, files={'blob': fobj})
+            assert resp.status_code == 200
+            fname = resp.headers.get('content-type', '')
+        else:
+            resp = DataResponse(self, requests.get(data_endpoint).json())
+            if resp.uri != uri_or_fobj:
+                raise ValueError(u'Attempt to update blob while changing URI.')
+        data = json.dumps(self._data(uri_or_fobj, fname, tags))
+        response = requests.put(data_endpoint, data=data,
+                                headers=self.headers_json)
         assert response.status_code == 200
         return DataResponse(self, response.json())
 
@@ -195,7 +181,10 @@ class TagStoreClient(object):
                 return tag[len(key) + 1:]
         return None
 
-    def delete(self, instanceid, force=False):
+    def _is_local(self, uri):
+        return uri.startswith(self._api_endpoint('ofs'))
+
+    def delete(self, instanceid):
         """Delete a Datum.
         
         force - delete the Datum even if stored locally and local blob is
@@ -203,19 +192,13 @@ class TagStoreClient(object):
 
         """
         # If file is stored locally, delete it
-        resp = requests.get(self._api_endpoint('data', unicode(instanceid)))
+        data_endpoint = self._api_endpoint('data', unicode(instanceid))
+        resp = requests.get(data_endpoint)
         if resp.status_code == 200:
             obj = DataResponse(self, resp.json())
-            parts = urlsplit(obj.uri)
-            if parts.scheme == self.OFS_SCHEME:
-                label = parts.path
-                try:
-                    self.ofs.del_stream(self.bucket_id, label)
-                except Exception:
-                    if not force:
-                        raise BaseException(u'Cannot delete missing locally stored file')
-        response = requests.delete(self._api_endpoint('data', instanceid),
-                                   headers=self.headers_json)
+            if self._is_local(obj.uri):
+                response = requests.delete(obj.uri)
+        response = requests.delete(data_endpoint)
         assert response.status_code == 204
         return None
 

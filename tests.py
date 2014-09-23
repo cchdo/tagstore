@@ -2,6 +2,7 @@ import json
 from StringIO import StringIO
 import logging
 from shutil import rmtree
+from urlparse import urlsplit
 
 
 log = logging.getLogger(__name__)
@@ -13,6 +14,7 @@ from flask.ext.testing import TestCase, LiveServerTestCase
 
 from flask.ext.restless import ProcessingException
 
+import tagstore
 from tagstore import app, replace_existing_tags, data_post
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
@@ -76,6 +78,7 @@ class RoutedTest(BaseTest):
 
 class TestViews(RoutedTest):
     api_data_endpoint = '{0}/data'.format(API_ENDPOINT)
+    api_ofs_endpoint = '{0}/ofs'.format(API_ENDPOINT)
 
     def test_data_post(self):
         data = {'uri': 'http://example.com', 'fname': 'testname'}
@@ -118,6 +121,71 @@ class TestViews(RoutedTest):
         response = self.http('get', self.api_data_endpoint, data=params)
         self.assert_200(response)
 
+    def test_ofs_get(self):
+        filecontents = 'btlex'
+        aaa = StringIO(filecontents)
+        fname = 'propername'
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (aaa, fname)},
+                         content_type='multipart/form-data')
+        self.assert_200(resp)
+        data = json.loads(resp.data)
+        self.assertEqual(data['fname'], fname)
+
+        path = urlsplit(data['uri']).path
+        resp = self.http('get', path)
+        self.assert_200(resp)
+        self.assertEqual(resp.data, filecontents)
+
+    def test_ofs_put(self):
+        filecontents0 = 'btlex'
+        filecontents1 = 'btlex'
+        aaa = StringIO(filecontents0)
+        fname = 'propername'
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (aaa, fname)},
+                         content_type='multipart/form-data')
+        self.assert_200(resp)
+        data = json.loads(resp.data)
+        path = urlsplit(data['uri']).path
+
+        aaa = StringIO(filecontents1)
+        fname = 'propername'
+        resp = self.http('put', path,
+                         data={'blob': (aaa, fname)},
+                         content_type='multipart/form-data')
+        self.assert_200(resp)
+
+        path = urlsplit(data['uri']).path
+        resp = self.http('get', path)
+        self.assert_200(resp)
+        self.assertEqual(resp.data, filecontents1)
+
+    def test_ofs_delete(self):
+        filecontents0 = 'btlex'
+        aaa = StringIO(filecontents0)
+        fname = 'propername'
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (aaa, fname)},
+                         content_type='multipart/form-data')
+        self.assert_200(resp)
+        data = json.loads(resp.data)
+        path = urlsplit(data['uri']).path
+        resp = self.http('delete', path)
+        self.assert_status(resp, 204)
+        resp = self.http('get', path)
+        self.assert_404(resp)
+
+    def test_ofs_create(self):
+        aaa = StringIO('btlex')
+        injected_name = '", {"injected": "json"}'
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (aaa, injected_name)},
+                         content_type='multipart/form-data')
+        self.assert_200(resp)
+        data = json.loads(resp.data)
+        self.assertEqual(data['fname'], '')
+
 
 class TestClient(LiveServerTestCase):
     PTOFS_DIR = 'tagstore-test'
@@ -131,12 +199,10 @@ class TestClient(LiveServerTestCase):
         return app
 
     def setUp(self):
-        ofs = PTOFS(storage_dir=self.PTOFS_DIR, uri_base='urn:uuid:',
-                    hashing_type='sha256')
-        self.tstore = TagStoreClient(self.FQ_API_ENDPOINT, ofs)
-
-    def tearDown(self):
         rmtree(self.PTOFS_DIR)
+        tagstore.ofs = PTOFS(storage_dir=self.PTOFS_DIR, uri_base='urn:uuid:',
+                             hashing_type='sha256')
+        self.tstore = TagStoreClient(self.FQ_API_ENDPOINT)
 
     def test_create(self):
         uri = 'aaa'
@@ -166,7 +232,7 @@ class TestClient(LiveServerTestCase):
 
         d_id = resp.id
 
-        resp = self.tstore.edit(d_id, 'aaa', [u'n'])
+        resp = self.tstore.edit(d_id, 'aaa', '', [u'n'])
         self.assertEqual(resp.tags, [u'n'])
 
     def test_local_file(self):
