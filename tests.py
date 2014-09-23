@@ -14,7 +14,7 @@ from flask.ext.testing import TestCase, LiveServerTestCase
 from flask.ext.restless import ProcessingException
 
 from tagstore import app, replace_existing_tags, data_post
-from tagstore.client import TagStoreClient, Query
+from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
 
 
@@ -78,7 +78,7 @@ class TestViews(RoutedTest):
     api_data_endpoint = '{0}/data'.format(API_ENDPOINT)
 
     def test_data_post(self):
-        data = {'uri': 'http://example.com'}
+        data = {'uri': 'http://example.com', 'fname': 'testname'}
         response = self.http('post', self.api_data_endpoint, data=json.dumps(data))
         self.assert_status(response, 201, 'Failed to create data')
         data = {'uri': 'aaa'}
@@ -141,28 +141,28 @@ class TestClient(LiveServerTestCase):
     def test_create(self):
         uri = 'aaa'
         tags = [u'm', u'n']
-        resp = self.tstore.create(uri, tags)
+        resp = self.tstore.create(uri, None, tags)
         self.assertEqual(resp.uri, uri)
         self.assertEqual(sorted(resp.tags), sorted(tags))
 
         uri = 'bbb'
         tags = [u'm', u'o']
-        resp = self.tstore.create(uri, tags)
+        resp = self.tstore.create(uri, None, tags)
         self.assertEqual(resp.uri, uri)
         self.assertEqual(sorted(resp.tags), sorted(tags))
 
-        resp = self.tstore.create('aaa', [u'm', u'n'])
+        resp = self.tstore.create('aaa', None, [u'm', u'n'])
         self.assertEqual(resp, None)
 
     def test_query(self):
-        self.tstore.create('aaa', [u'm', u'n'])
-        self.tstore.create('bbb', [u'm', u'o'])
+        self.tstore.create('aaa', None, [u'm', u'n'])
+        self.tstore.create('bbb', None, [u'm', u'o'])
 
         resp = self.tstore.query(Query.tags_any('eq', u'm'))
         self.assertEquals(len(resp), 2)
 
     def test_edit(self):
-        resp = self.tstore.create('aaa', [u'm', u'n'])
+        resp = self.tstore.create('aaa', None, [u'm', u'n'])
 
         d_id = resp.id
 
@@ -171,15 +171,15 @@ class TestClient(LiveServerTestCase):
 
     def test_local_file(self):
         aaa = StringIO('btlex')
-        self.tstore.create(aaa, [
+        self.tstore.create(aaa, None, [
             'cruise:1234', 'datatype:bottle', 'format:exchange', 'preliminary'])
 
         bbb = StringIO('ctdex')
-        self.tstore.create(bbb, [
+        self.tstore.create(bbb, None, [
             'cruise:1234', 'datatype:ctd', 'format:exchange'])
 
         ccc = StringIO('ctdzipnc')
-        self.tstore.create(ccc, [
+        self.tstore.create(ccc, None, [
             'cruise:1234', 'datatype:ctd', 'format:zip.netcdf'])
 
         response = self.tstore.query(Query.tags_any('eq', 'format:exchange'))
@@ -193,7 +193,7 @@ class TestClient(LiveServerTestCase):
 
     def test_query_response(self):
         for iii in range(20):
-            self.tstore.create(u'test:{0}'.format(iii), [u'm'])
+            self.tstore.create(u'test:{0}'.format(iii), None, [u'm'])
         resp = self.tstore.query(Query.tags_any('eq', u'm'))
         self.assertEqual(len(resp), 20)
         self.assertEqual(resp[15].uri, u'test:15')
@@ -201,6 +201,13 @@ class TestClient(LiveServerTestCase):
         self.assertEqual(resp[::-1][0].uri, u'test:19')
         with self.assertRaises(IndexError):
             resp[20]['uri']
+
+        resp = self.tstore.query(Query.tags_any('eq', u'asdf'))
+        self.assertEqual(len(resp), 0)
+        resp = self.tstore.query(['uri', 'eq', u'test:19'], single=True)
+        self.assertTrue(isinstance(resp, DataResponse))
+        resp = self.tstore.query(Query.tags_any('eq', u'asdf'), single=True)
+        self.assertIsNone(resp)
 
     def test_data_response(self):
         """Reading from a Data pointing to a URL should make the request."""

@@ -2,6 +2,9 @@ import os.path
 from copy import copy
 from urlparse import urlunsplit, urlsplit
 from uuid import uuid4
+import logging
+
+log = logging.getLogger(__name__)
 
 import requests
 
@@ -57,6 +60,11 @@ class QueryResponse(object):
 
         self.get_page()
 
+    @classmethod
+    def query(cls, client, params):
+        return requests.get(client._api_endpoint('data'), params=params,
+                            headers=client.headers_json)
+
     def get_page(self, page=None):
         params = copy(self.params)
         if page is not None:
@@ -64,8 +72,7 @@ class QueryResponse(object):
                 raise IndexError()
             params['page'] = page
 
-        response = requests.get(self.client._api_endpoint('data'),
-                                params=params, headers=self.client.headers_json)
+        response = self.query(self.client, params)
         assert response.status_code == 200
 
         json = response.json()
@@ -133,16 +140,16 @@ class TagStoreClient(object):
             val = self._list_to_filter(val)
         return self._filter(name, op, val)
 
-    def _wrap_filters(self, filters):
+    def _wrap_filters(self, filters, **kwargs):
         """Wrap the filters for restless."""
         assert isinstance(filters, tuple) or isinstance(filters, list)
-        return dict(filters=filters)
+        return dict(filters=filters, **kwargs)
 
-    def _data(self, uri, tags):
+    def _data(self, uri, fname, tags):
         """JSON representation of a Datum."""
-        return dict(uri=uri, tags=map(self._wrap_tag, tags))
+        return dict(uri=uri, fname=fname, tags=map(self._wrap_tag, tags))
 
-    def create(self, uri_or_fobj, tags=[]):
+    def create(self, uri_or_fobj, fname=None, tags=[]):
         """Create a Datum."""
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
@@ -152,14 +159,16 @@ class TagStoreClient(object):
             try:
                 fname = os.path.basename(fobj.name)
             except AttributeError:
-                fname = u'none'
-            self.ofs.update_metadata(self.bucket_id, label, {'filename': fname})
+                fname = None
             uri = urlunsplit((self.OFS_SCHEME, '', label, None, None))
         else:
             uri = uri_or_fobj
+            fname = os.path.basename(uri)
+            if not fname:
+                print repr(requests.head(uri).headers)
 
         response = requests.post(self._api_endpoint('data'),
-                                 data=json.dumps(self._data(uri, tags)),
+                                 data=json.dumps(self._data(uri, fname, tags)),
                                  headers=self.headers_json)
         assert response.status_code in (201, 409)
         if response.status_code == 201:
@@ -167,10 +176,10 @@ class TagStoreClient(object):
         else:
             return None
 
-    def edit(self, instanceid, uri, tags=[]):
+    def edit(self, instanceid, uri, fname, tags=[]):
         """Edit a Datum."""
         response = requests.put(self._api_endpoint('data', instanceid),
-                            data=json.dumps(self._data(uri, tags)),
+                            data=json.dumps(self._data(uri, fname, tags)),
                             headers=self.headers_json)
         assert response.status_code == 200
         return DataResponse(self, response.json())
@@ -210,7 +219,7 @@ class TagStoreClient(object):
         assert response.status_code == 204
         return None
 
-    def query(self, *filters):
+    def query(self, *filters, **kwargs):
         """Query the tag store for Data that satisfies the filters.
 
         filters - many 3-ples consisting of name, operation, and value.
@@ -223,7 +232,12 @@ class TagStoreClient(object):
 
         """
         params = dict(q=json.dumps(
-            self._wrap_filters(map(self._list_to_filter, filters))))
+            self._wrap_filters(map(self._list_to_filter, filters), **kwargs)))
+        if kwargs.get('single', False):
+            single = QueryResponse.query(self, params)
+            if single.status_code == 200:
+                return DataResponse(self, single.json())
+            return None
         return QueryResponse(self, params)
 
     @classmethod

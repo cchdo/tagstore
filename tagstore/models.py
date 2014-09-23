@@ -16,13 +16,16 @@ class Data(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # http://stackoverflow.com/questions/2659952
-    uri = db.Column(db.String(2**11), unique=True)
+    uri = db.Column(db.Unicode(2**11), unique=True)
+
+    fname = db.Column(db.Unicode(255))
 
     tags = db.relationship('Tag', secondary=tags,
         backref=db.backref('data', lazy='dynamic'))
 
-    def __init__(self, uri):
+    def __init__(self, uri, fname=None):
         self.uri = uri
+        self.fname = None
 
     def __repr__(self):
         return u'<Data {0!r}>'.format(self.uri)
@@ -30,7 +33,7 @@ class Data(db.Model):
 
 class Tag(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    tag = db.Column(db.String(128), unique=True)
+    tag = db.Column(db.Unicode(2**9), unique=True)
 
     def __init__(self, tag):
         self.tag = tag
