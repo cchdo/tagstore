@@ -16,25 +16,20 @@ class DataResponse(object):
     def __init__(self, client, json):
         self.client = client
         self.id = json['id']
+        self.fname = json['fname']
         self.uri = json['uri']
         self.tags = [tag['tag'] for tag in json['tags']]
 
     @property
     def filename(self):
-        resp = requests.head(self.uri)
-        if resp.status_code == 200:
-            try:
-                return resp.headers['content-disposition']
-            except KeyError:
-                pass
-        return os.path.basename(self.uri)
+        return self.fname
 
     def open(self):
         return requests.get(self.uri, stream=True).raw
 
     def __repr__(self):
-        return '<DataResponse({0}, {1}, {2})>'.format(self.id, self.uri,
-                                                      self.tags)
+        return '<DataResponse({0}, {1}, {2}, {3})>'.format(
+            self.id, self.uri, self.fname, self.tags)
 
 
 class QueryResponse(object):
@@ -131,20 +126,26 @@ class TagStoreClient(object):
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
             fobj = uri_or_fobj
-
-            resp = requests.post(self._api_endpoint('ofs'), files={'blob': fobj})
+            if fname is None:
+                try:
+                    fname = fobj.name
+                except AttributeError:
+                    fname = 'blob'
+            files = {'blob': (fname, fobj)}
+            resp = requests.post(self._api_endpoint('ofs'), files=files)
             assert resp.status_code in (200, 201)
-            uri = resp.json()['uri']
-            fname = resp.headers.get('content-type', '')
+            data = resp.json()
+            uri = data['uri']
         else:
             uri = uri_or_fobj
-            fname = os.path.basename(uri)
-            if not fname:
-                fname = requests.head(uri).headers.get('content-type', '')
+            if fname is None:
+                fname = os.path.basename(uri)
+                if not fname:
+                    fname = 'blob'
 
+        data = json.dumps(self._data(uri, fname, tags))
         response = requests.post(self._api_endpoint('data'),
-                                 data=json.dumps(self._data(uri, fname, tags)),
-                                 headers=self.headers_json)
+                                 data=data, headers=self.headers_json)
         assert response.status_code in (201, 409)
         if response.status_code == 201:
             return DataResponse(self, response.json())

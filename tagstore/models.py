@@ -25,7 +25,7 @@ class Data(db.Model):
 
     def __init__(self, uri, fname=None):
         self.uri = uri
-        self.fname = None
+        self.fname = fname
 
     def __repr__(self):
         return u'<Data {0!r}>'.format(self.uri)

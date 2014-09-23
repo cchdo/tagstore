@@ -199,10 +199,17 @@ class TestClient(LiveServerTestCase):
         return app
 
     def setUp(self):
-        rmtree(self.PTOFS_DIR)
+        try:
+            rmtree(self.PTOFS_DIR)
+        except OSError:
+            pass
+
         tagstore.ofs = PTOFS(storage_dir=self.PTOFS_DIR, uri_base='urn:uuid:',
                              hashing_type='sha256')
         self.tstore = TagStoreClient(self.FQ_API_ENDPOINT)
+
+    def tearDown(self):
+        rmtree(self.PTOFS_DIR)
 
     def test_create(self):
         uri = 'aaa'
@@ -241,8 +248,10 @@ class TestClient(LiveServerTestCase):
             'cruise:1234', 'datatype:bottle', 'format:exchange', 'preliminary'])
 
         bbb = StringIO('ctdex')
-        self.tstore.create(bbb, None, [
+        resp = self.tstore.create(bbb, 'bname', [
             'cruise:1234', 'datatype:ctd', 'format:exchange'])
+
+        self.assertEqual(resp.fname, 'bname')
 
         ccc = StringIO('ctdzipnc')
         self.tstore.create(ccc, None, [

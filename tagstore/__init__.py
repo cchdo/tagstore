@@ -95,8 +95,7 @@ def ofs_create():
     ofs.put_stream(BUCKET_ID, label, fobj)
     fname = fobj.filename
     ofs.update_metadata(BUCKET_ID, label, {'fname': fname})
-    return jsonify(dict(uri='{0}/{1}'.format(request.url, label),
-                        fname=fname))
+    return jsonify(dict(uri='{0}/{1}'.format(request.url, label), fname=fname))
 
 
 @app.route('{0}/ofs/<label>'.format(api_v1_prefix),
@@ -115,7 +114,8 @@ def ofs_get(label):
             # Flask converts the filename to an absolute path by prepending the
             # app directory which is incorrect. This is only used to add etags,
             # so just turn that off.
-            return send_file(stream, attachment_filename=fname, add_etags=False)
+            return send_file(stream, as_attachment=True,
+                             attachment_filename=fname, add_etags=False)
         except Exception as err:
             log.error(u'Local blob is missing for label {0}'.format(label))
             abort(404)
