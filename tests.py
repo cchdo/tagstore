@@ -6,8 +6,6 @@ from urlparse import urlsplit
 
 log = logging.getLogger(__name__)
 
-from ofs.local import PTOFS
-
 from flask.ext.testing import TestCase, LiveServerTestCase
 
 from flask.ext.restless import ProcessingException
@@ -196,6 +194,7 @@ class TestClient(LiveServerTestCase):
         app.config['LIVESERVER_PORT'] = self.port
         self.FQ_API_ENDPOINT = '{0}{1}'.format(self.get_server_url(),
                                                API_ENDPOINT)
+        tagstore.ofs = tagstore.OFSWrapper(storage_dir=self.PTOFS_DIR)
         return app
 
     def setUp(self):
@@ -203,13 +202,13 @@ class TestClient(LiveServerTestCase):
             rmtree(self.PTOFS_DIR)
         except OSError:
             pass
-
-        tagstore.ofs = PTOFS(storage_dir=self.PTOFS_DIR, uri_base='urn:uuid:',
-                             hashing_type='sha256')
         self.tstore = TagStoreClient(self.FQ_API_ENDPOINT)
 
     def tearDown(self):
-        rmtree(self.PTOFS_DIR)
+        try:
+            rmtree(self.PTOFS_DIR)
+        except OSError:
+            pass
 
     def test_create(self):
         uri = 'aaa'
@@ -304,3 +303,12 @@ class TestClient(LiveServerTestCase):
         data = self.tstore.create(aaa)
         self.assertEqual(data.filename, aaa.name)
         self.assertEqual(data.open().read(2), 'hi')
+
+    def test_edit_fname(self):
+        aaa = StringIO('ctdzipnc')
+        data = self.tstore.create(aaa, 'testname', ['tag0'])
+        data = self.tstore.edit(data.id, data.uri, 'newname', data.tags)
+        label = data.uri.split('/')[-1]
+        meta = tagstore.ofs.call('get_metadata', label)
+        self.assertEqual(meta['fname'], 'newname')
+

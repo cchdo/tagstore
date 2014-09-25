@@ -16,16 +16,22 @@ from models import db, Tag, Data
 app = Flask(__name__)
 
 
-# 2-char bucket label for shallower pairtree
-BUCKET_LABEL = u'ts'
-OFS_SCHEME = u'ofs'
+class OFSWrapper(object):
+    # 2-char bucket label for shallower pairtree
+    BUCKET_LABEL = u'ts'
 
-ofs = PTOFS(storage_dir='tagstore-data', uri_base='urn:uuid:',
-            hashing_type='sha256')
-if BUCKET_LABEL not in ofs.list_buckets():
-    BUCKET_ID = ofs.claim_bucket(BUCKET_LABEL)
-else:
-    BUCKET_ID = BUCKET_LABEL
+    def __init__(self, **kwargs):
+        self.ofs = PTOFS(uri_base='urn:uuid:', hashing_type='sha256', **kwargs)
+        if self.BUCKET_LABEL not in self.ofs.list_buckets():
+            self.bucket_id = self.ofs.claim_bucket(self.BUCKET_LABEL)
+        else:
+            self.bucket_id = self.BUCKET_LABEL
+
+    def call(self, method, label, *args, **kwargs):
+        return getattr(self.ofs, method)(self.bucket_id, label, *args, **kwargs)
+
+
+ofs = OFSWrapper(storage_dir='tagstore-data')
 
 
 manager = APIManager(app, flask_sqlalchemy_db=db)
@@ -93,9 +99,9 @@ manager.create_api(Tag, url_prefix=api_v1_prefix,
 def ofs_create():
     fobj = request.files['blob']
     label = str(uuid4())
-    ofs.put_stream(BUCKET_ID, label, fobj)
+    ofs.call('put_stream', label, fobj)
     fname = fobj.filename
-    ofs.update_metadata(BUCKET_ID, label, {'fname': fname})
+    ofs.call('update_metadata', label, {'fname': fname})
     return jsonify(dict(uri='{0}/{1}'.format(request.url, label), fname=fname))
 
 
@@ -116,18 +122,18 @@ def _update_http_headers(headers, metadata):
            methods=['HEAD', 'GET', 'PUT', 'DELETE'])
 def ofs_get(label):
     if request.method == 'HEAD':
-        metadata = ofs.get_metadata(BUCKET_ID, label)
+        metadata = ofs.call('get_metadata', label)
         headers = {}
         _update_http_headers(headers, metadata)
         return make_response('', 200, headers)
     elif request.method == 'GET':
         try:
-            stream = ofs.get_stream(BUCKET_ID, label)
+            stream = ofs.call('get_stream', label)
         except Exception as err:
             log.error(u'Local blob is missing for label {0}'.format(label))
             abort(404)
         else:
-            metadata = ofs.get_metadata(BUCKET_ID, label)
+            metadata = ofs.call('get_metadata', label)
             # Flask converts the filename to an absolute path by prepending the
             # app directory which is incorrect. This is only used to add etags,
             # so just turn that off.
@@ -135,11 +141,20 @@ def ofs_get(label):
             _update_http_headers(resp.headers, metadata)
             return resp
     elif request.method == 'PUT':
-        fobj = request.files['blob']
-        ofs.put_stream(BUCKET_ID, label, fobj)
+        try:
+            fname = request.form['fname']
+        except KeyError:
+            pass
+        else:
+            params = {'fname': fname}
+            ofs.call('update_metadata', label, params)
+
+        if request.files:
+            fobj = request.files['blob']
+            ofs.call('put_stream', label, fobj)
         return make_response('', 200)
     elif request.method == 'DELETE':
-        ofs.del_stream(BUCKET_ID, label)
+        ofs.call('del_stream', label)
         return make_response('', 204)
 
 

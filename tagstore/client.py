@@ -152,20 +152,35 @@ class TagStoreClient(object):
         else:
             return None
 
-    def edit(self, instanceid, uri_or_fobj, fname, tags=[]):
+    def edit(self, instanceid, uri_or_fobj=None, fname=None, tags=None):
         """Edit a Datum."""
         data_endpoint = self._api_endpoint('data', unicode(instanceid))
-        resp = DataResponse(self, requests.get(data_endpoint).json())
-        uri = resp.uri
-        if not isinstance(uri_or_fobj, basestring):
-            # Update the file first.
-            fobj = uri_or_fobj
-            resp = requests.put(resp.uri, files={'blob': fobj})
-            assert resp.status_code == 200
-        else:
-            if uri != uri_or_fobj:
-                raise ValueError(u'Attempt to update blob while changing URI.')
-        data = json.dumps(self._data(uri, fname, tags))
+        resp = requests.get(data_endpoint)
+        if resp.status_code != 200:
+            abort(404)
+        dresp = DataResponse(self, resp.json())
+        data = {}
+        if uri_or_fobj is not None:
+            uri = dresp.uri
+            if not isinstance(uri_or_fobj, basestring):
+                # Update the stored file
+                fobj = uri_or_fobj
+                resp = requests.put(uri, files={'blob': fobj})
+                assert resp.status_code == 200
+            else:
+                # Update the the URI
+                if uri != uri_or_fobj:
+                    raise ValueError(u'Attempt to update blob while changing URI.')
+                else:
+                    data['uri'] = uri
+        if fname is not None:
+            data['fname'] = fname
+            # If file is stored locally, also change its fname
+            if self._is_local(uri) and dresp.fname != fname:
+                response = requests.put(uri, data=dict(fname=fname))
+        if tags is not None:
+            data['tags'] = map(self._wrap_tag, tags)
+        data = json.dumps(data)
         response = requests.put(data_endpoint, data=data,
                                 headers=self.headers_json)
         assert response.status_code == 200
