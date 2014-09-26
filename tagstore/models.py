@@ -4,6 +4,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 
 
 db = SQLAlchemy()
+# NOTE: SQLite performance is surprisingly slow.
 
 
 tags = db.Table('tags',

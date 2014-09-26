@@ -32,9 +32,20 @@ class DataResponse(object):
             self.id, self.uri, self.fname, self.tags)
 
 
-class QueryResponse(object):
-    def __init__(self, client, params):
+class TagResponse(object):
+    def __init__(self, client, json):
         self.client = client
+        self.tag = json['tag']
+
+    def __repr__(self):
+        return '<TagResponse({0})>'.format(self.tag)
+
+
+class QueryResponse(object):
+    def __init__(self, client, endpoint, wrapper, params, preload=False):
+        self.client = client
+        self.endpoint = endpoint
+        self.wrapper = wrapper
         self.params = params
 
         self.objects = []
@@ -42,10 +53,14 @@ class QueryResponse(object):
         self.page = 1
 
         self.get_page()
+        if preload:
+            while self.page < self.num_pages:
+                self.page += 1
+                self.get_page(self.page)
 
     @classmethod
-    def query(cls, client, params):
-        return requests.get(client._api_endpoint('data'), params=params,
+    def query(cls, endpoint, client, params):
+        return requests.get(client._api_endpoint(endpoint), params=params,
                             headers=client.headers_json)
 
     def get_page(self, page=None):
@@ -55,11 +70,11 @@ class QueryResponse(object):
                 raise IndexError()
             params['page'] = page
 
-        response = self.query(self.client, params)
+        response = self.query(self.endpoint, self.client, params)
         assert response.status_code == 200
 
         json = response.json()
-        self.objects += [DataResponse(self.client, obj) for obj in json['objects']]
+        self.objects += [self.wrapper(self.client, obj) for obj in json['objects']]
         self.num_pages = json['total_pages']
         self.num_results = json['num_results']
 
@@ -82,13 +97,15 @@ class QueryResponse(object):
                 self.page += 1
                 self.get_page(self.page)
         self.iii += 1
+        # If you get an error here, you might be editing the results of the
+        # query while using the results.
         return self.objects[self.iii - 1]
 
     def __len__(self):
         return self.num_results
 
     def __repr__(self):
-        return '<QueryResponse({0})>'.format(len(self))
+        return '<QueryResponse({0}, {1})>'.format(self.endpoint, len(self))
 
 
 class TagStoreClient(object):
@@ -123,6 +140,7 @@ class TagStoreClient(object):
 
     def create(self, uri_or_fobj, fname=None, tags=[]):
         """Create a Datum."""
+        from time import time
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
             fobj = uri_or_fobj
@@ -144,8 +162,10 @@ class TagStoreClient(object):
                     fname = 'blob'
 
         data = json.dumps(self._data(uri, fname, tags))
+        ttt = time()
         response = requests.post(self._api_endpoint('data'),
                                  data=data, headers=self.headers_json)
+        print 'b', time() - ttt
         assert response.status_code in (201, 409)
         if response.status_code == 201:
             return DataResponse(self, response.json())
@@ -218,8 +238,8 @@ class TagStoreClient(object):
         assert response.status_code == 204
         return None
 
-    def query(self, *filters, **kwargs):
-        """Query the tag store for Data that satisfies the filters.
+    def _query(self, endpoint, wrapper, *filters, **kwargs):
+        """Query the tag store for object that satisfies the filters.
 
         filters - many 3-ples consisting of name, operation, and value.
         
@@ -230,14 +250,37 @@ class TagStoreClient(object):
         automatically reconstructed.
 
         """
+        try:
+            preload = kwargs['preload']
+        except KeyError:
+            preload = False
+        else:
+            del kwargs['preload']
+        
         params = dict(q=json.dumps(
             self._wrap_filters(map(self._list_to_filter, filters), **kwargs)))
         if kwargs.get('single', False):
-            single = QueryResponse.query(self, params)
+            single = QueryResponse.query(self, endpoint, params, preload)
             if single.status_code == 200:
                 return DataResponse(self, single.json())
             return None
-        return QueryResponse(self, params)
+        return QueryResponse(self, endpoint, wrapper, params, preload)
+
+    def query(self, *filters, **kwargs):
+        """Query the tagstore for Data that satisfy the filters.
+
+        See _query() for details.
+
+        """
+        return self._query('data', DataResponse, *filters, **kwargs)
+
+    def query_tags(self, *filters, **kwargs):
+        """Query the tag store for Tags that satisfy the filters.
+
+        See _query() for details.
+
+        """
+        return self._query('tags', TagResponse, *filters, **kwargs)
 
     @classmethod
     def _filter(cls, name=None, op=None, val=None):
