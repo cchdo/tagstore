@@ -6,31 +6,38 @@ from urlparse import urlsplit
 
 log = logging.getLogger(__name__)
 
+from flask import Flask
 from flask.ext.testing import TestCase, LiveServerTestCase
-
 from flask.ext.restless import ProcessingException
 
 import requests
 
 import tagstore
-from tagstore import app, replace_existing_tags, data_post
+from tagstore import init_app, replace_existing_tags, data_post
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
-
-
-def _create_app(self):
-    app.config['TESTING'] = True
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'
-    db.init_app(app)
-    db.create_all(app=app)
-    return app
 
 
 API_ENDPOINT = '/api/v1'
 
 
+def _create_test_app(self):
+    app = Flask(__name__)
+    app.config.from_object('tagstore.settings.default')
+    app.config.from_object('tagstore.settings.test')
+    init_app(app)
+    return app
+
+
 class BaseTest(TestCase):
-    create_app = _create_app
+    create_app = _create_test_app
+
+    def setUp(self):
+        db.create_all()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
 
 
 class TestUnit(BaseTest):
@@ -186,29 +193,32 @@ class TestViews(RoutedTest):
 
 
 class TestClient(LiveServerTestCase):
-    PTOFS_DIR = 'tagstore-test'
-
     def create_app(self):
-        app = _create_app(self)
-        self.port = 8943
-        app.config['LIVESERVER_PORT'] = self.port
+        app = _create_test_app(self)
+        self.port = app.config['LIVESERVER_PORT']
         self.FQ_API_ENDPOINT = '{0}{1}'.format(self.get_server_url(),
                                                API_ENDPOINT)
-        tagstore.ofs = tagstore.OFSWrapper(storage_dir=self.PTOFS_DIR)
+        with app.app_context():
+            db.create_all()
         return app
 
     def setUp(self):
+        super(TestClient, self).setUp()
         try:
-            rmtree(self.PTOFS_DIR)
+            rmtree(self.app.config['PTOFS_DIR'])
         except OSError:
             pass
         self.tstore = TagStoreClient(self.FQ_API_ENDPOINT)
 
     def tearDown(self):
+        super(TestClient, self).tearDown()
         try:
-            rmtree(self.PTOFS_DIR)
+            rmtree(self.app.config['PTOFS_DIR'])
         except OSError:
             pass
+        with self.app.app_context():
+            db.session.remove()
+            db.drop_all()
 
     def test_create(self):
         uri = 'aaa'
@@ -309,6 +319,7 @@ class TestClient(LiveServerTestCase):
         data = self.tstore.create(aaa, 'testname', ['tag0'])
         data = self.tstore.edit(data.id, data.uri, 'newname', data.tags)
         label = data.uri.split('/')[-1]
-        meta = tagstore.ofs.call('get_metadata', label)
-        self.assertEqual(meta['fname'], 'newname')
+        with self.app.app_context():
+            meta = tagstore.ofs.call('get_metadata', label)
+            self.assertEqual(meta['fname'], 'newname')
 

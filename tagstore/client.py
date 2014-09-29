@@ -260,7 +260,7 @@ class TagStoreClient(object):
         params = dict(q=json.dumps(
             self._wrap_filters(map(self._list_to_filter, filters), **kwargs)))
         if kwargs.get('single', False):
-            single = QueryResponse.query(self, endpoint, params, preload)
+            single = QueryResponse.query(endpoint, self, params)
             if single.status_code == 200:
                 return DataResponse(self, single.json())
             return None

@@ -5,15 +5,17 @@ from mimetypes import guess_type
 
 log = logging.getLogger(__name__)
 
-from flask import Flask, jsonify, abort, request, send_file, make_response
+from flask import (
+    Flask, g, Blueprint, current_app, jsonify, abort, request, send_file,
+    make_response
+)
 from flask.ext.restless import APIManager, ProcessingException
+
+from werkzeug.local import LocalProxy
 
 from ofs.local import PTOFS
 
 from models import db, Tag, Data
-
-
-app = Flask(__name__)
 
 
 class OFSWrapper(object):
@@ -21,6 +23,9 @@ class OFSWrapper(object):
     BUCKET_LABEL = u'ts'
 
     def __init__(self, **kwargs):
+        self.init(**kwargs)
+
+    def init(self, **kwargs):
         self.ofs = PTOFS(uri_base='urn:uuid:', hashing_type='sha256', **kwargs)
         if self.BUCKET_LABEL not in self.ofs.list_buckets():
             self.bucket_id = self.ofs.claim_bucket(self.BUCKET_LABEL)
@@ -31,10 +36,14 @@ class OFSWrapper(object):
         return getattr(self.ofs, method)(self.bucket_id, label, *args, **kwargs)
 
 
-ofs = OFSWrapper(storage_dir='tagstore-data')
+def get_ofs():
+    ofs = getattr(g, '_ofs', None)
+    if ofs is None:
+        ofs = g._ofs = OFSWrapper(storage_dir=current_app.config['PTOFS_DIR'])
+    return ofs
 
 
-manager = APIManager(app, flask_sqlalchemy_db=db)
+ofs = LocalProxy(get_ofs)
 
 
 api_v1_prefix = '/api/v1'
@@ -68,7 +77,11 @@ def is_uri_present_for_data(data):
     except KeyError:
         pass
     else:
-        old = Data.query.filter_by(uri=uri).first()
+        try:
+            old = Data.query.filter_by(uri=uri).first()
+        except Exception as err:
+            log.error(err)
+            raise
         if old:
             return True
     return False
@@ -81,21 +94,10 @@ def data_post(data=None, **kw):
     replace_existing_tags(data)
 
 
-manager.create_api(Data, url_prefix=api_v1_prefix,
-                   preprocessors={
-                       'PATCH_SINGLE': [data_patch_single],
-                       'POST': [data_post],
-                   },
-                   methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+store_blueprint = Blueprint('storage', __name__, )
 
 
-manager.create_api(Tag, url_prefix=api_v1_prefix,
-                   methods=['GET'],
-                   exclude_columns=['id', 'data'],
-                   collection_name='tags')
-
-
-@app.route('{0}/ofs'.format(api_v1_prefix), methods=['POST'])
+@store_blueprint.route('{0}/ofs'.format(api_v1_prefix), methods=['POST'])
 def ofs_create():
     fobj = request.files['blob']
     label = str(uuid4())
@@ -118,7 +120,7 @@ def _update_http_headers(headers, metadata):
         pass
 
 
-@app.route('{0}/ofs/<label>'.format(api_v1_prefix),
+@store_blueprint.route('{0}/ofs/<label>'.format(api_v1_prefix),
            methods=['HEAD', 'GET', 'PUT', 'DELETE'])
 def ofs_get(label):
     if request.method == 'HEAD':
@@ -130,7 +132,8 @@ def ofs_get(label):
         try:
             stream = ofs.call('get_stream', label)
         except Exception as err:
-            log.error(u'Local blob is missing for label {0}'.format(label))
+            log.error(u'Local blob is missing for label {0}: {1!r}'.format(
+                label, err))
             abort(404)
         else:
             metadata = ofs.call('get_metadata', label)
@@ -158,8 +161,28 @@ def ofs_get(label):
         return make_response('', 204)
 
 
+def init_app(app):
+    with app.app_context():
+        db.init_app(app)
+
+    app.register_blueprint(store_blueprint)
+
+    manager = APIManager(app, flask_sqlalchemy_db=db)
+    manager.create_api(Data, url_prefix=api_v1_prefix,
+                       preprocessors={
+                           'PATCH_SINGLE': [data_patch_single],
+                           'POST': [data_post],
+                       },
+                       methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+    manager.create_api(Tag, url_prefix=api_v1_prefix,
+                       methods=['GET'],
+                       exclude_columns=['id', 'data'],
+                       collection_name='tags')
+
+
 if __name__ == "__main__":
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/tagstore.db'
-    db.init_app(app)
-    db.create_all(app=app)
-    app.run('0.0.0.0', debug=True)
+    app = Flask(__name__)
+    app.config.from_object('tagstore.settings.default')
+    app.config.from_envvar('TAGSTORE_SETTINGS')
+    init_app(app)
+    app.run('0.0.0.0')
