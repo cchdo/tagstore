@@ -13,7 +13,7 @@ from flask.ext.restless import ProcessingException
 import requests
 
 import tagstore
-from tagstore import init_app, replace_existing_tags, data_post
+from tagstore.server import init_app, ofs, replace_existing_tags, data_post
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
 
@@ -236,11 +236,21 @@ class TestClient(LiveServerTestCase):
         resp = self.tstore.create('aaa', None, [u'm', u'n'])
         self.assertEqual(resp, None)
 
-    def test_query(self):
+    def test_query_data(self):
         self.tstore.create('aaa', None, [u'm', u'n'])
         self.tstore.create('bbb', None, [u'm', u'o'])
 
-        resp = self.tstore.query(Query.tags_any('eq', u'm'))
+        resp = self.tstore.query_data(Query.tags_any('eq', u'm'))
+        self.assertEquals(len(resp), 2)
+
+    def test_query_tags(self):
+        self.tstore.create('aaa', None, [u'm', u'n:/asdf'])
+        self.tstore.create('bbb', None, [u'm', u'n:/asdf/qwer'])
+
+        resp = self.tstore.query_tags(['tag', 'eq', u'm'])
+        self.assertEquals(len(resp), 1)
+
+        resp = self.tstore.query_tags(['tag', 'like', u'n:/asdf%'])
         self.assertEquals(len(resp), 2)
 
     def test_edit(self):
@@ -266,7 +276,7 @@ class TestClient(LiveServerTestCase):
         self.tstore.create(ccc, None, [
             'cruise:1234', 'datatype:ctd', 'format:zip.netcdf'])
 
-        response = self.tstore.query(Query.tags_any('eq', 'format:exchange'))
+        response = self.tstore.query_data(Query.tags_any('eq', 'format:exchange'))
         self.assertEqual(len(response), 2)
 
     def test_local_file_http(self):
@@ -287,7 +297,7 @@ class TestClient(LiveServerTestCase):
     def test_query_response(self):
         for iii in range(20):
             self.tstore.create(u'test:{0}'.format(iii), None, [u'm'])
-        resp = self.tstore.query(Query.tags_any('eq', u'm'))
+        resp = self.tstore.query_data(Query.tags_any('eq', u'm'))
         self.assertEqual(len(resp), 20)
         self.assertEqual(resp[15].uri, u'test:15')
         self.assertEqual(len(resp[9:15]), 6)
@@ -295,11 +305,11 @@ class TestClient(LiveServerTestCase):
         with self.assertRaises(IndexError):
             resp[20]['uri']
 
-        resp = self.tstore.query(Query.tags_any('eq', u'asdf'))
+        resp = self.tstore.query_data(Query.tags_any('eq', u'asdf'))
         self.assertEqual(len(resp), 0)
-        resp = self.tstore.query(['uri', 'eq', u'test:19'], single=True)
+        resp = self.tstore.query_data(['uri', 'eq', u'test:19'], single=True)
         self.assertTrue(isinstance(resp, DataResponse))
-        resp = self.tstore.query(Query.tags_any('eq', u'asdf'), single=True)
+        resp = self.tstore.query_data(Query.tags_any('eq', u'asdf'), single=True)
         self.assertIsNone(resp)
 
     def test_data_response(self):
@@ -320,6 +330,6 @@ class TestClient(LiveServerTestCase):
         data = self.tstore.edit(data.id, data.uri, 'newname', data.tags)
         label = data.uri.split('/')[-1]
         with self.app.app_context():
-            meta = tagstore.ofs.call('get_metadata', label)
+            meta = ofs.call('get_metadata', label)
             self.assertEqual(meta['fname'], 'newname')
 

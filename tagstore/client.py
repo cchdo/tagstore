@@ -140,7 +140,6 @@ class TagStoreClient(object):
 
     def create(self, uri_or_fobj, fname=None, tags=[]):
         """Create a Datum."""
-        from time import time
         if not isinstance(uri_or_fobj, basestring):
             # Store the file first.
             fobj = uri_or_fobj
@@ -162,10 +161,8 @@ class TagStoreClient(object):
                     fname = 'blob'
 
         data = json.dumps(self._data(uri, fname, tags))
-        ttt = time()
         response = requests.post(self._api_endpoint('data'),
                                  data=data, headers=self.headers_json)
-        print 'b', time() - ttt
         assert response.status_code in (201, 409)
         if response.status_code == 201:
             return DataResponse(self, response.json())
@@ -266,7 +263,7 @@ class TagStoreClient(object):
             return None
         return QueryResponse(self, endpoint, wrapper, params, preload)
 
-    def query(self, *filters, **kwargs):
+    def query_data(self, *filters, **kwargs):
         """Query the tagstore for Data that satisfy the filters.
 
         See _query() for details.
