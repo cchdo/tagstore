@@ -157,7 +157,10 @@ def ofs_get(label):
             ofs.call('put_stream', label, fobj)
         return make_response('', 200)
     elif request.method == 'DELETE':
-        ofs.call('del_stream', label)
+        try:
+            ofs.call('del_stream', label)
+        except Exception:
+            pass
         return make_response('', 204)
 
 
