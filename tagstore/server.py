@@ -16,7 +16,7 @@ from werkzeug.local import LocalProxy
 
 from ofs.local import PTOFS
 
-from models import db, Tag, Data
+from models import db, Tag, Data, tags
 
 
 class OFSWrapper(object):
@@ -93,6 +93,13 @@ def data_post(data=None, **kw):
         raise ProcessingException(description='Already present', code=409)
 
     replace_existing_tags(data)
+
+
+def tag_delete(instance_id=None, **kw):
+    any_referencing = db.session.query(tags.c.tag_id).filter(
+        tags.c.tag_id == instance_id).count()
+    if any_referencing:
+        raise ProcessingException(description='Tag is referenced', code=409)
 
 
 store_blueprint = Blueprint('storage', __name__, )
@@ -194,8 +201,11 @@ def init_app(app):
                        },
                        methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
     manager.create_api(Tag, url_prefix=api_v1_prefix,
-                       methods=['GET'],
-                       exclude_columns=['id', 'data'],
+                       preprocessors={
+                           'DELETE': [tag_delete],
+                       },
+                       methods=['GET', 'DELETE'],
+                       exclude_columns=['data'],
                        collection_name='tags')
 
 

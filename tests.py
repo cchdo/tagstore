@@ -337,6 +337,17 @@ class TestClient(LiveServerTestCase):
         self.assertTrue(headers['content-disposition'].endswith('blob'))
         self.assertEqual(headers['content-length'], '5')
 
+    def test_delete_tag(self):
+        resp = self.tstore.create('aaa', 'aname', ['taga'])
+        tag = self.tstore.query_tags(['tag', 'eq', 'taga'])[0]
+        t_id = tag.id
+        with self.assertRaises(ValueError):
+            self.tstore.delete_tag(t_id)
+        self.tstore.edit(resp.id, 'aaa', 'aname', [])
+        self.tstore.delete_tag(t_id)
+        self.assertEqual(self.tstore.query_data(['fname', 'eq',
+                                                 'aname'])[0].tags, [])
+
     def test_delete_local_file(self):
         ccc = StringIO('ctdzipnc')
         resp = self.tstore.create(ccc)

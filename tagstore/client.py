@@ -35,10 +35,11 @@ class DataResponse(object):
 class TagResponse(object):
     def __init__(self, client, json):
         self.client = client
+        self.id = json['id']
         self.tag = json['tag']
 
     def __repr__(self):
-        return '<TagResponse({0})>'.format(self.tag)
+        return '<TagResponse({0}, {1})>'.format(self.id, self.tag)
 
 
 class QueryResponse(object):
@@ -218,12 +219,7 @@ class TagStoreClient(object):
         return uri.startswith(self._api_endpoint('ofs'))
 
     def delete(self, instanceid):
-        """Delete a Datum.
-        
-        force - delete the Datum even if stored locally and local blob is
-        missing.
-
-        """
+        """Delete a Datum."""
         # If file is stored locally, delete it
         data_endpoint = self._api_endpoint('data', unicode(instanceid))
         resp = requests.get(data_endpoint)
@@ -233,6 +229,15 @@ class TagStoreClient(object):
                 response = requests.delete(obj.uri)
         response = requests.delete(data_endpoint)
         assert response.status_code == 204
+        return None
+
+    def delete_tag(self, instanceid):
+        """Delete a Tag."""
+        tag_endpoint = self._api_endpoint('tags', unicode(instanceid))
+        response = requests.delete(tag_endpoint)
+        assert response.status_code in (204, 409)
+        if response.status_code == 409:
+            raise ValueError(u'Tag is still in use.')
         return None
 
     def _query(self, endpoint, wrapper, *filters, **kwargs):
