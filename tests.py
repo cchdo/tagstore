@@ -1,4 +1,6 @@
 import json
+import os.path
+from datetime import datetime, timedelta
 from StringIO import StringIO
 import logging
 from shutil import rmtree
@@ -13,7 +15,9 @@ from flask.ext.restless import ProcessingException
 import requests
 
 import tagstore
-from tagstore.server import init_app, ofs, replace_existing_tags, data_post
+from tagstore.server import (
+    init_app, ofs, replace_existing_tags, data_post, gc_ofs
+)
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
 
@@ -34,10 +38,18 @@ class BaseTest(TestCase):
 
     def setUp(self):
         db.create_all()
+        try:
+            rmtree(self.app.config['PTOFS_DIR'])
+        except OSError:
+            pass
 
     def tearDown(self):
         db.session.remove()
         db.drop_all()
+        try:
+            rmtree(self.app.config['PTOFS_DIR'])
+        except OSError:
+            pass
 
 
 class TestUnit(BaseTest):
@@ -190,6 +202,43 @@ class TestViews(RoutedTest):
         self.assert_200(resp)
         data = json.loads(resp.data)
         self.assertEqual(data['fname'], '')
+
+    def test_gc(self):
+        faa = StringIO('aaa')
+        fbb = StringIO('bbb')
+        fcc = StringIO('ccc')
+
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (faa, 'namea')},
+                         content_type='multipart/form-data')
+        dataa = json.loads(resp.data)
+        daa = Data(dataa['uri'], 'namea')
+        db.session.add(daa)
+        db.session.flush()
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (fbb, 'nameb')},
+                         content_type='multipart/form-data')
+        datab = json.loads(resp.data)
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (fcc, 'namec')},
+                         content_type='multipart/form-data')
+        datac = json.loads(resp.data)
+
+        dcclabel = os.path.basename(datac['uri'])
+        olddate = (datetime.now() - timedelta(seconds=61)).strftime('%Y-%m-%dT%H:%M:%S')
+        _, json_payload = ofs.ofs._get_object(ofs.BUCKET_LABEL)
+        json_payload[dcclabel]['_last_modified'] = olddate
+        json_payload.sync()
+
+        self.assertEqual(len(ofs.call('list_labels')), 3)
+        # If a blob is referenced, do not delete it
+        # If a blob was created in the last minute, do not delete it, it may not
+        # have been associated with its Data resource yet.
+        # else, go ahead and remove the blob...
+        gc_ofs()
+        self.assertEqual(sorted(ofs.call('list_labels')),
+                         sorted([os.path.basename(dataa['uri']),
+                          os.path.basename(datab['uri'])]))
 
 
 class TestClient(LiveServerTestCase):

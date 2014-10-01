@@ -1,6 +1,7 @@
 from uuid import uuid4
 import os.path
 import logging
+from datetime import datetime, timedelta
 from mimetypes import guess_type
 
 log = logging.getLogger(__name__)
@@ -32,8 +33,8 @@ class OFSWrapper(object):
         else:
             self.bucket_id = self.BUCKET_LABEL
 
-    def call(self, method, label, *args, **kwargs):
-        return getattr(self.ofs, method)(self.bucket_id, label, *args, **kwargs)
+    def call(self, method, *args, **kwargs):
+        return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
 
 
 def get_ofs():
@@ -162,6 +163,21 @@ def ofs_get(label):
         except Exception:
             pass
         return make_response('', 204)
+
+
+def gc_ofs():
+    local_data = Data.query.filter(Data.uri.like('%/api/%/ofs/%')).all()
+    present_labels = set([os.path.basename(ddd.uri) for ddd in local_data])
+    for label in ofs.call('list_labels'):
+        meta = ofs.call('get_metadata', label)
+        mtime = datetime.strptime(meta['_last_modified'], '%Y-%m-%dT%H:%M:%S')
+        grace_time = datetime.now() - timedelta(seconds=60)
+        # Still within the grace period
+        if mtime >= grace_time:
+            continue
+        if label in present_labels:
+            continue
+        ofs.call('del_stream', label)
 
 
 def init_app(app):
