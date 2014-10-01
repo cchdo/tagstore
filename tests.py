@@ -309,6 +309,14 @@ class TestClient(LiveServerTestCase):
         self.assertEqual(len(resp), 0)
         resp = self.tstore.query_data(['uri', 'eq', u'test:19'], single=True)
         self.assertTrue(isinstance(resp, DataResponse))
+
+        # More than one result
+        with self.assertRaises(ValueError):
+            self.tstore.query_data(Query.tags_any('eq', 'm'), single=True)
+
+        resp = self.tstore.query_data(Query.tags_any('eq', 'm'), limit=1, single=True)
+        self.assertTrue(isinstance(resp, DataResponse))
+
         resp = self.tstore.query_data(Query.tags_any('eq', u'asdf'), single=True)
         self.assertIsNone(resp)
 

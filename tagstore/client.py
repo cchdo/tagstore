@@ -260,6 +260,8 @@ class TagStoreClient(object):
             single = QueryResponse.query(endpoint, self, params)
             if single.status_code == 200:
                 return DataResponse(self, single.json())
+            elif single.status_code == 400:
+                raise ValueError(u'Multiple results, try limit?')
             return None
         return QueryResponse(self, endpoint, wrapper, params, preload)
 
