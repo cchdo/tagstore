@@ -115,9 +115,12 @@ def ofs_create():
     return jsonify(dict(uri='{0}/{1}'.format(request.url, label), fname=fname))
 
 
-def _update_http_headers(headers, metadata):
+def _update_http_headers(headers, metadata, as_attachment=False):
     fname = metadata.get('fname', '')
-    headers['Content-Disposition'] = 'inline; filename={0}'.format(fname)
+    if as_attachment:
+        headers['Content-Disposition'] = 'attachment; filename={0}'.format(fname)
+    else:
+        headers['Content-Disposition'] = 'inline; filename={0}'.format(fname)
     mtype = guess_type(fname)[0]
     if not mtype:
         mtype = 'application/octet-stream'
@@ -131,10 +134,11 @@ def _update_http_headers(headers, metadata):
 @store_blueprint.route('{0}/ofs/<label>'.format(api_v1_prefix),
            methods=['HEAD', 'GET', 'PUT', 'DELETE'])
 def ofs_get(label):
+    as_attachment = "as_attachment" in request.args
     if request.method == 'HEAD':
         metadata = ofs.call('get_metadata', label)
         headers = {}
-        _update_http_headers(headers, metadata)
+        _update_http_headers(headers, metadata, as_attachment)
         return make_response('', 200, headers)
     elif request.method == 'GET':
         try:
@@ -149,7 +153,7 @@ def ofs_get(label):
             # app directory which is incorrect. This is only used to add etags,
             # so just turn that off.
             resp = send_file(stream, add_etags=False)
-            _update_http_headers(resp.headers, metadata)
+            _update_http_headers(resp.headers, metadata, as_attachment)
             return resp
     elif request.method == 'PUT':
         try:
