@@ -95,6 +95,31 @@ def data_post(data=None, **kw):
     replace_existing_tags(data)
 
 
+class TagPatchSingle(object):
+    new_tag = None
+
+    @classmethod
+    def pre(cls, instance_id=None, data=None, **kw):
+        tag = Tag.query.filter_by(tag=data['tag']).first()
+        if tag:
+            # The "new" tag is really replacing with a preexisting tag.
+            tags.update().where(
+                tags.c.tag_id == instance_id).values(tag_id=tag.id)
+            data['tag'] = 'newtag{0}'.format(tag.id)
+            cls.new_tag = tag.id
+
+    @classmethod
+    def post(cls, result=None, **kw):
+        if cls.new_tag != None:
+            tag = Tag.query.get(result['id'])
+            db.session.delete(tag)
+            db.session.commit()
+            newtag = Tag.query.get(cls.new_tag)
+            result['id'] = newtag.id
+            result['tag'] = newtag.tag
+            cls.new_tag = None
+
+
 def tag_delete(instance_id=None, **kw):
     any_referencing = db.session.query(tags.c.tag_id).filter(
         tags.c.tag_id == instance_id).count()
@@ -206,10 +231,14 @@ def init_app(app):
                        methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
     manager.create_api(Tag, url_prefix=api_v1_prefix,
                        preprocessors={
+                           'PATCH_SINGLE': [TagPatchSingle.pre],
                            'DELETE': [tag_delete],
                        },
-                       methods=['GET', 'DELETE'],
-                       exclude_columns=['data'],
+                       postprocessors={
+                           'PATCH_SINGLE': [TagPatchSingle.post],
+                       },
+                       methods=['GET', 'PUT', 'PATCH', 'DELETE'],
+                       include_columns=['id', 'tag'],
                        collection_name='tags')
 
 

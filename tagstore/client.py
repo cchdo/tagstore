@@ -204,6 +204,17 @@ class TagStoreClient(object):
         assert response.status_code == 200
         return DataResponse(self, response.json())
 
+    def edit_tag(self, instanceid, tag):
+        """Edit a Tag."""
+        tag_endpoint = self._api_endpoint('tags', unicode(instanceid))
+        data = json.dumps(self._wrap_tag(tag))
+        response = requests.put(tag_endpoint, data=data,
+                                headers=self.headers_json)
+        if response.status_code == 404:
+            abort(404)
+        assert response.status_code == 200
+        return TagResponse(self, response.json())
+
     @classmethod
     def _tagobjs_to_tags(cls, tagobjs):
         return [tagobj['tag'] for tagobj in tagobjs]
@@ -264,7 +275,7 @@ class TagStoreClient(object):
         if kwargs.get('single', False):
             single = QueryResponse.query(endpoint, self, params)
             if single.status_code == 200:
-                return DataResponse(self, single.json())
+                return wrapper(self, single.json())
             elif single.status_code == 400:
                 raise ValueError(u'Multiple results, try limit?')
             return None

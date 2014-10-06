@@ -401,3 +401,20 @@ class TestClient(LiveServerTestCase):
             meta = ofs.call('get_metadata', label)
             self.assertEqual(meta['fname'], 'newname')
 
+    def test_edit_tag(self):
+        data = self.tstore.create('uri', 'fname', ['oldtag'])
+        tag = self.tstore.query_tags(
+            ['tag', 'eq', 'oldtag'], limit=1, single=True)
+        tag = self.tstore.edit_tag(tag.id, 'newtag')
+        self.assertEqual(tag.tag, 'newtag')
+
+    def test_edit_tag_already_present(self):
+        data = self.tstore.create('uri', 'fname', ['oldtag1', 'oldtag2'])
+        tag = self.tstore.query_tags(
+            ['tag', 'eq', 'oldtag1'], limit=1, single=True)
+        tag = self.tstore.edit_tag(tag.id, 'oldtag2')
+        self.assertEqual(tag.tag, 'oldtag2')
+        tags = self.tstore.query_tags(['tag', 'eq', 'oldtag2'])
+        self.assertEqual(tags[0].tag, 'oldtag2')
+        tags = self.tstore.query_tags()
+        self.assertEqual(len(tags), 1)
