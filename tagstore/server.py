@@ -142,10 +142,11 @@ def ofs_create():
 
 def _update_http_headers(headers, metadata, as_attachment=False):
     fname = metadata.get('fname', '')
+    disposition = 'inline'
     if as_attachment:
-        headers['Content-Disposition'] = 'attachment; filename={0}'.format(fname)
-    else:
-        headers['Content-Disposition'] = 'inline; filename={0}'.format(fname)
+        disposition = 'attachment'
+    headers['Content-Disposition'] = '{0}; filename={1}'.format(
+        disposition, fname)
     mtype = guess_type(fname)[0]
     if not mtype:
         mtype = 'application/octet-stream'
@@ -159,7 +160,7 @@ def _update_http_headers(headers, metadata, as_attachment=False):
 @store_blueprint.route('{0}/ofs/<label>'.format(api_v1_prefix),
            methods=['HEAD', 'GET', 'PUT', 'DELETE'])
 def ofs_get(label):
-    as_attachment = "as_attachment" in request.args
+    as_attachment = request.headers.get('X-As-Attachment', 'no') == 'yes'
     if request.method == 'HEAD':
         metadata = ofs.call('get_metadata', label)
         headers = {}

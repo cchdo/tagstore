@@ -15,9 +15,8 @@ from flask.ext.restless import ProcessingException
 import requests
 
 import tagstore
-from tagstore.server import (
-    init_app, ofs, replace_existing_tags, data_post, gc_ofs
-)
+from tagstore import server
+from tagstore.server import ofs
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
 
@@ -29,7 +28,7 @@ def _create_test_app(self):
     app = Flask(__name__)
     app.config.from_object('tagstore.settings.default')
     app.config.from_object('tagstore.settings.test')
-    init_app(app)
+    server.init_app(app)
     return app
 
 
@@ -55,42 +54,61 @@ class BaseTest(TestCase):
 class TestUnit(BaseTest):
     def test_replace_existing_tags(self):
         data = {'tags': []}
-        replace_existing_tags(data)
+        server.replace_existing_tags(data)
         self.assertTrue(data['tags'] == [])
 
         data = {'tags': [{'tag': 'aaa'}]}
-        replace_existing_tags(data)
+        server.replace_existing_tags(data)
         self.assertTrue(data['tags'][0] == {'tag': 'aaa'})
 
         db.session.add(Tag('aaa'))
         db.session.flush()
         data = {'tags': [{'tag': 'aaa'}]}
-        replace_existing_tags(data)
+        server.replace_existing_tags(data)
         tag = Tag.query.filter_by(tag='aaa').first()
         self.assertTrue(data['tags'][0] == {'id': tag.id})
 
         data = {'tags': [{'tag': 'aaa'}, {'tag': 'bbb'}]}
-        replace_existing_tags(data)
+        server.replace_existing_tags(data)
         tag = Tag.query.filter_by(tag='aaa').first()
         self.assertTrue(data['tags'][0] == {'id': tag.id})
         self.assertTrue(data['tags'][1] == {'tag': 'bbb'})
 
     def test_data_post(self):
         data = {'uri': 'abcd'}
-        data_post(data)
+        server.data_post(data)
 
         db.session.add(Data('abcd'))
         db.session.flush()
         with self.assertRaises(ProcessingException):
-            data_post(data)
+            server.data_post(data)
+
+    def test_update_http_headers(self):
+        headers = {}
+        metadata = {}
+        server._update_http_headers(headers, metadata, as_attachment=True)
+        self.assertEqual(headers['Content-Disposition'], 'attachment; filename=')
+        self.assertEqual(headers['Content-Type'], 'application/octet-stream')
+        metadata['fname'] = 'test.txt'
+        server._update_http_headers(headers, metadata)
+        self.assertEqual(headers['Content-Disposition'],
+                         'inline; filename=test.txt')
+        self.assertEqual(headers['Content-Type'], 'text/plain')
 
 
 class RoutedTest(BaseTest):
     headers_json = {'Content-Type': 'application/json'}
 
     def http(self, func, endpoint, **kwargs):
+        try:
+            headers = kwargs['headers']
+        except KeyError:
+            headers = self.headers_json
+        else:
+            headers.update(self.headers_json)
+            del kwargs['headers']
         func = getattr(self.client, func)
-        return func(endpoint, headers=self.headers_json, **kwargs)
+        return func(endpoint, headers=headers, **kwargs)
 
 
 class TestViews(RoutedTest):
@@ -153,6 +171,10 @@ class TestViews(RoutedTest):
         resp = self.http('get', path)
         self.assert_200(resp)
         self.assertEqual(resp.data, filecontents)
+
+        resp = self.http('get', path, headers={'X-As-Attachment': 'yes'})
+        self.assertTrue(
+            resp.headers['content-disposition'].startswith('attachment'))
 
     def test_ofs_put(self):
         filecontents0 = 'btlex'
@@ -235,7 +257,7 @@ class TestViews(RoutedTest):
         # If a blob was created in the last minute, do not delete it, it may not
         # have been associated with its Data resource yet.
         # else, go ahead and remove the blob...
-        gc_ofs()
+        server.gc_ofs()
         self.assertEqual(sorted(ofs.call('list_labels')),
                          sorted([os.path.basename(dataa['uri']),
                           os.path.basename(datab['uri'])]))
