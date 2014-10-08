@@ -172,6 +172,9 @@ class TestViews(RoutedTest):
         self.assert_200(resp)
         self.assertEqual(resp.data, filecontents)
 
+        resp = self.http('head', path)
+        self.assertEqual(resp.headers['content-length'], str(5))
+
         resp = self.http('get', path, headers={'X-As-Attachment': 'yes'})
         self.assertTrue(
             resp.headers['content-disposition'].startswith('attachment'))

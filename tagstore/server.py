@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from flask import (
     Flask, g, Blueprint, current_app, jsonify, abort, request, send_file,
-    make_response
+    make_response, Response
 )
 from flask.ext.restless import APIManager, ProcessingException
 
@@ -165,7 +165,9 @@ def ofs_get(label):
         metadata = ofs.call('get_metadata', label)
         headers = {}
         _update_http_headers(headers, metadata, as_attachment)
-        return make_response('', 200, headers)
+        response = Response()
+        response.headers.extend(headers)
+        return response
     elif request.method == 'GET':
         try:
             stream = ofs.call('get_stream', label)
