@@ -1,4 +1,5 @@
 import json
+import types
 import os.path
 from datetime import datetime, timedelta
 from StringIO import StringIO
@@ -95,6 +96,29 @@ class TestUnit(BaseTest):
                          'inline; filename=test.txt')
         self.assertEqual(headers['Content-Type'], 'text/plain')
 
+    def test_zip_load(self):
+        zfile = server._zip_load([], '')
+        self.assertTrue(isinstance(zfile, types.GeneratorType))
+        contents = zfile.next()
+        self.assertEqual(len(contents), 22)
+        self.assertTrue(contents[:2], 'PK')
+
+        data = 'http://999.0.0.0'
+        ddd = Data(data, 'broken')
+        arcname = 'namea'
+        zfile = server._zip_load([(ddd, arcname)], 'ofs')
+        contents = zfile.next()
+        self.assertEqual(len(contents), 22)
+
+    def test_zip_max_size(self):
+        self.assertEqual(server._zip_max_size([], ''), 22)
+
+        data = 'data:text/html,'
+        ddd = Data(data, 'nameb')
+        arcname = 'namea'
+        self.assertEqual(server._zip_max_size([(ddd, arcname)], 'ofs'),
+                         22 + 88 + (len(arcname) + 1) * 2)
+
 
 class RoutedTest(BaseTest):
     headers_json = {'Content-Type': 'application/json'}
@@ -114,6 +138,7 @@ class RoutedTest(BaseTest):
 class TestViews(RoutedTest):
     api_data_endpoint = '{0}/data'.format(API_ENDPOINT)
     api_ofs_endpoint = '{0}/ofs'.format(API_ENDPOINT)
+    api_zip_endpoint = '{0}/zip'.format(API_ENDPOINT)
 
     def test_data_post(self):
         data = {'uri': 'http://example.com', 'fname': 'testname'}
@@ -264,6 +289,29 @@ class TestViews(RoutedTest):
         self.assertEqual(sorted(ofs.call('list_labels')),
                          sorted([os.path.basename(dataa['uri']),
                           os.path.basename(datab['uri'])]))
+
+    def test_zip(self):
+        faa = StringIO('aaa')
+        resp = self.http('post', self.api_ofs_endpoint,
+                         data={'blob': (faa, 'namea')},
+                         content_type='multipart/form-data')
+        dataa = json.loads(resp.data)
+        daa = Data(dataa['uri'], 'namea')
+        db.session.add(daa)
+        db.session.flush()
+        dbb = Data('data:text/html,', 'nameb')
+        db.session.add(dbb)
+        db.session.flush()
+
+        data_arcnames = [(daa.id, 'namea'), (dbb.id, 'namea/nameb')]
+        fname = 'test.zip'
+        data = dict(data_arcnames=data_arcnames,
+                    ofs_endpoint=self.api_ofs_endpoint, fname=fname)
+        resp = self.http('post', self.api_zip_endpoint, data=json.dumps(data))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['Content-Type'], 'application/zip')
+        self.assertEqual(resp.headers['Content-Disposition'],
+                         'attachment; filename={0}'.format(fname))
 
 
 class TestClient(LiveServerTestCase):
