@@ -42,6 +42,12 @@ class TagResponse(object):
         return '<TagResponse({0}, {1})>'.format(self.id, self.tag)
 
 
+def ensure_response_status(response, *statuses):
+    """Assert that the requests response status is in statuses."""
+    assert response.status_code in statuses, '{0} {1} -> {2}'.format(
+        response.request.method, response.request.url, response.status_code)
+
+
 class QueryResponse(object):
     def __init__(self, client, endpoint, wrapper, params, preload=False):
         self.client = client
@@ -72,7 +78,7 @@ class QueryResponse(object):
             params['page'] = page
 
         response = self.query(self.endpoint, self.client, params)
-        assert response.status_code == 200
+        ensure_response_status(response, 200)
 
         json = response.json()
         self.objects += [self.wrapper(self.client, obj) for obj in json['objects']]
@@ -139,7 +145,7 @@ class TagStoreClient(object):
                     fname = 'blob'
             files = {'blob': (fname, fobj)}
             resp = requests.post(self._api_endpoint('ofs'), files=files)
-            assert resp.status_code in (200, 201)
+            ensure_response_status(resp, 200, 201)
             data = resp.json()
             uri = data['uri']
         else:
@@ -152,7 +158,7 @@ class TagStoreClient(object):
         data = json.dumps(self._data(uri, fname, tags))
         response = requests.post(self._api_endpoint('data'),
                                  data=data, headers=self.headers_json)
-        assert response.status_code in (201, 409)
+        ensure_response_status(response, 201, 409)
         if response.status_code == 201:
             return DataResponse(self, response.json())
         else:
@@ -172,7 +178,7 @@ class TagStoreClient(object):
                 # Update the stored file
                 fobj = uri_or_fobj
                 resp = requests.put(uri, files={'blob': fobj})
-                assert resp.status_code == 200
+                ensure_response_status(resp, 200)
             else:
                 # Update the the URI
                 if uri != uri_or_fobj:
@@ -215,13 +221,13 @@ class TagStoreClient(object):
         data['tags']['add'] = add_term
         response = requests.put(self._api_endpoint('data'), data=json.dumps(data),
                                 headers=self.headers_json)
-        assert response.status_code == 200
+        ensure_response_status(response, 200)
 
         data['q'] = self.list_to_q(*case2_filters, **kwargs)
         del data['tags']['add']
         response = requests.put(self._api_endpoint('data'), data=json.dumps(data),
                                 headers=self.headers_json)
-        assert response.status_code == 200
+        ensure_response_status(response, 200)
 
     def edit_tag(self, instanceid, tag):
         """Edit a Tag."""
@@ -231,7 +237,7 @@ class TagStoreClient(object):
                                 headers=self.headers_json)
         if response.status_code == 404:
             abort(404)
-        assert response.status_code == 200
+        ensure_response_status(response, 200)
         return TagResponse(self, response.json())
 
     @classmethod
@@ -258,14 +264,14 @@ class TagStoreClient(object):
             if self._is_local(obj.uri):
                 response = requests.delete(obj.uri)
         response = requests.delete(data_endpoint)
-        assert response.status_code == 204
+        ensure_response_status(response, 204)
         return None
 
     def delete_tag(self, instanceid):
         """Delete a Tag."""
         tag_endpoint = self._api_endpoint('tags', unicode(instanceid))
         response = requests.delete(tag_endpoint)
-        assert response.status_code in (204, 409)
+        ensure_response_status(response, 204, 409)
         if response.status_code == 409:
             raise ValueError(u'Tag is still in use.')
         return None
