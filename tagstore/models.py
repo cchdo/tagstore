@@ -1,6 +1,6 @@
 from flask.ext.sqlalchemy import SQLAlchemy
 
-from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy import UniqueConstraint
 
 
 db = SQLAlchemy()
@@ -9,7 +9,8 @@ db = SQLAlchemy()
 
 tags = db.Table('tags',
     db.Column('tag_id', db.Integer, db.ForeignKey('tag.id')),
-    db.Column('data_id', db.Integer, db.ForeignKey('data.id'))
+    db.Column('data_id', db.Integer, db.ForeignKey('data.id')),
+    UniqueConstraint('tag_id', 'data_id'),
 )
 
 

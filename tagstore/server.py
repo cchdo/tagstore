@@ -16,7 +16,7 @@ from flask import (
     Flask, g, Blueprint, current_app, jsonify, abort, request, send_file,
     make_response, Response, stream_with_context
 )
-from flask.ext.restless import APIManager, ProcessingException
+from flask.ext.restless import APIManager, ProcessingException, search
 
 from werkzeug.local import LocalProxy
 
@@ -329,13 +329,19 @@ def init_app(app):
     app.register_blueprint(zip_blueprint)
     app.register_blueprint(store_blueprint)
 
+    # Add operators to restless
+    search.OPERATORS['not_any'] = lambda f, a, fn: ~f.any(search._sub_operator(f, a, fn))
+    search.OPERATORS['not_ilike'] = lambda f, a: ~f.ilike(a)
+    search.OPERATORS['not_like'] = lambda f, a: ~f.like(a)
+
     manager = APIManager(app, flask_sqlalchemy_db=db)
     manager.create_api(Data, url_prefix=api_v1_prefix,
                        preprocessors={
                            'PATCH_SINGLE': [data_patch_single],
                            'POST': [data_post],
                        },
-                       methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+                       methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+                       allow_patch_many=True)
     manager.create_api(Tag, url_prefix=api_v1_prefix,
                        preprocessors={
                            'PATCH_SINGLE': [TagPatchSingle.pre],

@@ -123,18 +123,6 @@ class TagStoreClient(object):
         assert isinstance(tag, basestring)
         return dict(tag=tag)
 
-    def _list_to_filter(self, lll):
-        """Convert the client's 3-ple filter format to that of restless."""
-        name, op, val = lll
-        if isinstance(val, tuple) or isinstance(val, list):
-            val = self._list_to_filter(val)
-        return self._filter(name, op, val)
-
-    def _wrap_filters(self, filters, **kwargs):
-        """Wrap the filters for restless."""
-        assert isinstance(filters, tuple) or isinstance(filters, list)
-        return dict(filters=filters, **kwargs)
-
     def _data(self, uri, fname, tags):
         """JSON representation of a Datum."""
         return dict(uri=uri, fname=fname, tags=map(self._wrap_tag, tags))
@@ -204,6 +192,37 @@ class TagStoreClient(object):
         assert response.status_code == 200
         return DataResponse(self, response.json())
 
+    def swap_tags(self, tag_old, tag_new, *filters, **kwargs):
+        """Swap out old tag for new tag for all Data that match."""
+        told = self.query_tags(['tag', 'eq', tag_old], limit=1, single=True)
+        tnew = self.query_tags(['tag', 'eq', tag_new], limit=1, single=True)
+        data = dict(tags={})
+        if tnew:
+            add_term = [dict(id=tnew.id)]
+        else:
+            add_term = [self._wrap_tag(tag_new)]
+        data['tags']['remove'] = [dict(id=told.id)]
+
+        # Two cases, in order
+        # If add does not happen first it will be deleted and replace will not
+        # happen.
+        # 1. new tag not present, add new and remove old tag
+        # 2. new tag already present, just remove old tag
+        case2_filters = [['tags__tag', 'any', tag_old]] + list(filters)
+        case1_filters = [['tags__tag', 'not_any', tag_new]] + case2_filters
+
+        data['q'] = self.list_to_q(*case1_filters, **kwargs)
+        data['tags']['add'] = add_term
+        response = requests.put(self._api_endpoint('data'), data=json.dumps(data),
+                                headers=self.headers_json)
+        assert response.status_code == 200
+
+        data['q'] = self.list_to_q(*case2_filters, **kwargs)
+        del data['tags']['add']
+        response = requests.put(self._api_endpoint('data'), data=json.dumps(data),
+                                headers=self.headers_json)
+        assert response.status_code == 200
+
     def edit_tag(self, instanceid, tag):
         """Edit a Tag."""
         tag_endpoint = self._api_endpoint('tags', unicode(instanceid))
@@ -270,8 +289,7 @@ class TagStoreClient(object):
         else:
             del kwargs['preload']
         
-        params = dict(q=json.dumps(
-            self._wrap_filters(map(self._list_to_filter, filters), **kwargs)))
+        params = dict(q=json.dumps(self.list_to_q(*filters, **kwargs)))
         if kwargs.get('single', False):
             single = QueryResponse.query(endpoint, self, params)
             if single.status_code == 200:
@@ -301,6 +319,24 @@ class TagStoreClient(object):
     def _filter(cls, name=None, op=None, val=None):
         """Shorthand to create a filter object for REST API."""
         return dict(name=name, op=op, val=val)
+
+    @classmethod
+    def _list_to_filter(cls, lll):
+        """Convert the client's 3-ple filter format to that of restless."""
+        name, op, val = lll
+        if isinstance(val, tuple) or isinstance(val, list):
+            val = cls._list_to_filter(val)
+        return cls._filter(name, op, val)
+
+    @classmethod
+    def _wrap_filters(cls, filters, **kwargs):
+        """Wrap the filters for restless."""
+        assert isinstance(filters, tuple) or isinstance(filters, list)
+        return dict(filters=filters, **kwargs)
+
+    @classmethod
+    def list_to_q(cls, *filters, **kwargs):
+        return cls._wrap_filters(map(cls._list_to_filter, filters), **kwargs)
 
 
 class Query(object):

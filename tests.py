@@ -491,3 +491,16 @@ class TestClient(LiveServerTestCase):
         self.assertEqual(tags[0].tag, 'oldtag2')
         tags = self.tstore.query_tags()
         self.assertEqual(len(tags), 1)
+
+    def test_swap_tags(self):
+        data = self.tstore.create('uri0', 'fname', ['oldtag1'])
+        data = self.tstore.create('uri1', 'fname', ['oldtag2', 'oldtag1'])
+        self.tstore.swap_tags('oldtag1', 'oldtag2')
+
+        for data in self.tstore.query_data():
+            self.assertEqual(data.tags, ['oldtag2'])
+
+        self.tstore.swap_tags('oldtag2', 'oldtag1')
+
+        for data in self.tstore.query_data():
+            self.assertEqual(data.tags, ['oldtag1'])
