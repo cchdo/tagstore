@@ -4,6 +4,8 @@ import os.path
 from datetime import datetime, timedelta
 from StringIO import StringIO
 import logging
+from time import sleep
+from threading import Thread, Condition, current_thread
 from shutil import rmtree
 from urlparse import urlsplit
 
@@ -17,7 +19,7 @@ import requests
 
 import tagstore
 from tagstore import server
-from tagstore.server import ofs
+from tagstore.server import ofs, OFSWrapper
 from tagstore.client import TagStoreClient, Query, DataResponse
 from tagstore.models import db, Tag, Data
 
@@ -181,6 +183,11 @@ class TestViews(RoutedTest):
         response = self.http('get', self.api_data_endpoint, data=params)
         self.assert_200(response)
 
+        filters = [dict(name='tags', op='not_any', val=dict(name='tag', op='eq', val='d'))]
+        params = dict(q=json.dumps(dict(filters=filters)))
+        response = self.http('get', self.api_data_endpoint, data=params)
+        self.assert_200(response)
+
     def test_ofs_get(self):
         filecontents = 'btlex'
         aaa = StringIO(filecontents)
@@ -252,6 +259,107 @@ class TestViews(RoutedTest):
         self.assert_200(resp)
         data = json.loads(resp.data)
         self.assertEqual(data['fname'], '')
+
+    def test_ofs_create_threadsafe(self):
+        """Creating OFSWrapper needs to be threadsafe.
+
+        Make sure that initializing the PTOFS is guarded.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+
+        class ThreadX(Thread):
+            def run(self):
+                ofs = OFSWrapper(storage_dir=ofs_dir)
+
+        threada = ThreadX(name='aaa')
+        threadb = ThreadX(name='bbb')
+
+        # Set up ThreadA, the persistent state is read in
+        threada.start()
+        threadb.start()
+
+        threada.join()
+        threadb.join()
+
+    def test_ofs_put_stream_threadsafe(self):
+        """Editing streams needs to be threadsafe.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+
+        class ThreadX(Thread):
+            def run(self):
+                ofs = OFSWrapper(storage_dir=ofs_dir)
+                ofs.call('put_stream', 'hello', StringIO(current_thread().name))
+
+        threada = ThreadX(name='aaa')
+        threadb = ThreadX(name='bbb')
+
+        threada.start()
+        threadb.start()
+
+        threada.join()
+        threadb.join()
+
+        ofs = OFSWrapper(storage_dir=ofs_dir)
+        out = ofs.call('get_stream', 'hello')
+        # Result is whichever thread was started later
+        self.assertEqual(out.read(), 'bbb')
+
+    def test_ofs_threadsafe(self):
+        """Concurrent edits to the OFS may not be threadsafe.
+
+        OFS pairtree operates on a PersistentState object that is shared.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+        pausea = Condition()
+        bucket = 'testbucket'
+
+        class ThreadA(Thread):
+            def run(self):
+                ofs = OFSWrapper(storage_dir=ofs_dir)
+
+                _, json_payload = ofs.ofs._get_object(bucket)
+                json_payload.update(dict(aaa=111))
+                log.debug('aaa {0}'.format(json_payload))
+
+                # Avoid deadlock when B correctly waits for PTOFS lock and A is
+                # already holding it. Allow A to continue and release the lock.
+                count = 0
+                while count < 1 and not pausea.acquire(False):
+                    sleep(0.1)
+                    count += 1
+                json_payload.sync()
+
+        class ThreadB(Thread):
+            def run(self):
+                ofs = OFSWrapper(storage_dir=ofs_dir)
+                _, json_payload = ofs.ofs._get_object(bucket)
+                json_payload.update(dict(bbb=222))
+                log.debug('bbb {0}'.format(json_payload))
+                json_payload.sync()
+
+        threada = ThreadA()
+        threadb = ThreadB()
+
+        # Set up ThreadA, the persistent state is read in
+        pausea.acquire()
+        threada.start()
+
+        # Run ThreadB
+        threadb.start()
+        threadb.join()
+
+        # Allow ThreadA to continue, the persistent state is written out.
+        # If no locking, ThreadB's changes will be wiped out.
+        pausea.release()
+        threada.join()
+
+        ofs = OFSWrapper(storage_dir=ofs_dir)
+        _, json_payload = ofs.ofs._get_object(bucket)
+        self.assertEqual(dict(aaa=111, bbb=222), json_payload)
 
     def test_gc(self):
         faa = StringIO('aaa')

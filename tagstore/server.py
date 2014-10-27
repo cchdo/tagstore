@@ -7,6 +7,7 @@ import json
 from contextlib import contextmanager, closing
 from shutil import copyfileobj
 from tempfile import NamedTemporaryFile
+from threading import RLock
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ from ofs.local import PTOFS
 from zipstream import ZipFile, ZIP_DEFLATED
 
 from models import db, Tag, Data, tags
+import patch.ptofs
+import patch.restless
+
+
+ofslock = RLock()
 
 
 class OFSWrapper(object):
@@ -35,11 +41,13 @@ class OFSWrapper(object):
         self.init(**kwargs)
 
     def init(self, **kwargs):
+        ofslock.acquire()
         self.ofs = PTOFS(uri_base='urn:uuid:', hashing_type='sha256', **kwargs)
         if self.BUCKET_LABEL not in self.ofs.list_buckets():
             self.bucket_id = self.ofs.claim_bucket(self.BUCKET_LABEL)
         else:
             self.bucket_id = self.BUCKET_LABEL
+        ofslock.release()
 
     def call(self, method, *args, **kwargs):
         return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
@@ -328,11 +336,6 @@ def init_app(app):
 
     app.register_blueprint(zip_blueprint)
     app.register_blueprint(store_blueprint)
-
-    # Add operators to restless
-    search.OPERATORS['not_any'] = lambda f, a, fn: ~f.any(search._sub_operator(f, a, fn))
-    search.OPERATORS['not_ilike'] = lambda f, a: ~f.ilike(a)
-    search.OPERATORS['not_like'] = lambda f, a: ~f.like(a)
 
     manager = APIManager(app, flask_sqlalchemy_db=db)
     manager.create_api(Data, url_prefix=api_v1_prefix,
