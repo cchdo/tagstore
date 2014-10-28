@@ -6,10 +6,13 @@ from StringIO import StringIO
 import logging
 from time import sleep
 from threading import Thread, Condition, current_thread
+from multiprocessing import Process, Condition as mCondition
 from shutil import rmtree
 from urlparse import urlsplit
 
 log = logging.getLogger(__name__)
+
+from nose.tools import nottest
 
 from flask import Flask
 from flask.ext.testing import TestCase, LiveServerTestCase
@@ -260,6 +263,8 @@ class TestViews(RoutedTest):
         data = json.loads(resp.data)
         self.assertEqual(data['fname'], '')
 
+    # No longer a valid test due to use of processes
+    @nottest
     def test_ofs_create_threadsafe(self):
         """Creating OFSWrapper needs to be threadsafe.
 
@@ -275,13 +280,33 @@ class TestViews(RoutedTest):
         threada = ThreadX(name='aaa')
         threadb = ThreadX(name='bbb')
 
-        # Set up ThreadA, the persistent state is read in
         threada.start()
         threadb.start()
 
         threada.join()
         threadb.join()
 
+    def test_ofs_create_processsafe(self):
+        """Creating OFSWrapper needs to be processsafe.
+
+        Make sure that initializing the PTOFS is guarded.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+
+        def run():
+            ofs = OFSWrapper(storage_dir=ofs_dir)
+
+        pa = Process(target=run)
+        pb = Process(target=run)
+        pa.start()
+        pb.start()
+
+        pa.join()
+        pb.join()
+
+    # No longer a valid test due to use of processes
+    @nottest
     def test_ofs_put_stream_threadsafe(self):
         """Editing streams needs to be threadsafe.
 
@@ -307,6 +332,32 @@ class TestViews(RoutedTest):
         # Result is whichever thread was started later
         self.assertEqual(out.read(), 'bbb')
 
+    def test_ofs_put_stream_processsafe(self):
+        """Editing streams needs to be processsafe.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+
+        def run(name):
+            ofs = OFSWrapper(storage_dir=ofs_dir)
+            ofs.call('put_stream', 'hello', StringIO(name))
+
+        pa = Process(target=run, args=('aaa',))
+        pb = Process(target=run, args=('bbb',))
+
+        pa.start()
+        pb.start()
+
+        pa.join()
+        pb.join()
+
+        ofs = OFSWrapper(storage_dir=ofs_dir)
+        out = ofs.call('get_stream', 'hello')
+        # Result is whichever thread was started later
+        self.assertEqual(out.read(), 'bbb')
+
+    # No longer a valid test due to use of processes
+    @nottest
     def test_ofs_threadsafe(self):
         """Concurrent edits to the OFS may not be threadsafe.
 
@@ -356,6 +407,58 @@ class TestViews(RoutedTest):
         # If no locking, ThreadB's changes will be wiped out.
         pausea.release()
         threada.join()
+
+        ofs = OFSWrapper(storage_dir=ofs_dir)
+        _, json_payload = ofs.ofs._get_object(bucket)
+        self.assertEqual(dict(aaa=111, bbb=222), json_payload)
+
+    def test_ofs_processsafe(self):
+        """Concurrent edits to the OFS may not be processsafe.
+
+        OFS pairtree operates on a PersistentState object that is shared.
+
+        """
+        ofs_dir = self.app.config['PTOFS_DIR']
+        pausea = mCondition()
+        bucket = 'testbucket'
+
+        def runa():
+            ofs = OFSWrapper(storage_dir=ofs_dir)
+
+            _, json_payload = ofs.ofs._get_object(bucket)
+            json_payload.update(dict(aaa=111))
+            log.debug('aaa {0}'.format(json_payload))
+
+            # Avoid deadlock when B correctly waits for PTOFS lock and A is
+            # already holding it. Allow A to continue and release the lock.
+            count = 0
+            while count < 1 and not pausea.acquire(False):
+                sleep(0.1)
+                count += 1
+            json_payload.sync()
+
+        def runb():
+            ofs = OFSWrapper(storage_dir=ofs_dir)
+            _, json_payload = ofs.ofs._get_object(bucket)
+            json_payload.update(dict(bbb=222))
+            log.debug('bbb {0}'.format(json_payload))
+            json_payload.sync()
+
+        pa = Process(target=runa)
+        pb = Process(target=runb)
+
+        # Set up aaa, the persistent state is read in
+        pausea.acquire()
+        pa.start()
+
+        # Run bbb
+        pb.start()
+        pb.join()
+
+        # Allow aaa to continue, the persistent state is written out.
+        # If no locking, bbb's changes will be wiped out.
+        pausea.release()
+        pa.join()
 
         ofs = OFSWrapper(storage_dir=ofs_dir)
         _, json_payload = ofs.ofs._get_object(bucket)

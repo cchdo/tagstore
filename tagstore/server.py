@@ -7,7 +7,6 @@ import json
 from contextlib import contextmanager, closing
 from shutil import copyfileobj
 from tempfile import NamedTemporaryFile
-from threading import RLock
 
 log = logging.getLogger(__name__)
 
@@ -28,26 +27,25 @@ from zipstream import ZipFile, ZIP_DEFLATED
 from models import db, Tag, Data, tags
 import patch.ptofs
 import patch.restless
-
-
-ofslock = RLock()
+from patch.lockfile import RLockFile
 
 
 class OFSWrapper(object):
     # 2-char bucket label for shallower pairtree
     BUCKET_LABEL = u'ts'
+    ofslock = RLockFile('.lock-ofs')
 
     def __init__(self, **kwargs):
         self.init(**kwargs)
 
     def init(self, **kwargs):
-        ofslock.acquire()
+        self.ofslock.acquire()
         self.ofs = PTOFS(uri_base='urn:uuid:', hashing_type='sha256', **kwargs)
         if self.BUCKET_LABEL not in self.ofs.list_buckets():
             self.bucket_id = self.ofs.claim_bucket(self.BUCKET_LABEL)
         else:
             self.bucket_id = self.BUCKET_LABEL
-        ofslock.release()
+        self.ofslock.release()
 
     def call(self, method, *args, **kwargs):
         return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
@@ -367,4 +365,4 @@ if __name__ == "__main__":
     except IndexError:
         raise IndexError(u'Please supply a configuration file.')
     init_app(app)
-    app.run('0.0.0.0')
+    app.run('0.0.0.0', processes=4)

@@ -2,3 +2,4 @@ Flask-SQLAlchemy
 Flask-Restless
 ofs
 Pairtree
+zc.lockfile
