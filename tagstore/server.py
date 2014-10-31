@@ -4,9 +4,6 @@ import logging
 from datetime import datetime, timedelta
 from mimetypes import guess_type
 import json
-from contextlib import contextmanager, closing
-from shutil import copyfileobj
-from tempfile import NamedTemporaryFile
 
 log = logging.getLogger(__name__)
 
@@ -22,9 +19,9 @@ from werkzeug.local import LocalProxy
 
 from ofs.local import PTOFS
 
-from zipstream import ZipFile, ZIP_DEFLATED
 
 from models import db, Tag, Data, tags
+from tempfilezipstream import TempFileStreamingZipFile, FileWrapper
 import patch.ptofs
 import patch.restless
 from patch.lockfile import RLockFile
@@ -145,91 +142,59 @@ def _is_local_ofs(ofs_endpoint, uri):
     return uri.startswith(ofs_endpoint)
 
 
-class TempFileStreamingZipFile(ZipFile):
-    def __init__(self, *args, **kwargs):
-        super(TempFileStreamingZipFile, self).__init__(*args, **kwargs)
-        self._tfiles = []
-
-    def __close(self):
-        for data in super(TempFileStreamingZipFile, self).__close():
-            yield data
-        for tfile in self._tfiles:
-            tfile.close()
+zip_blueprint = Blueprint('zip', __name__, )
 
 
-def _zip_load(data_arcnames, ofs_endpoint):
-    zfile = TempFileStreamingZipFile(mode='w', allowZip64=True)
-    for datum, arcname in data_arcnames:
-        if arcname is None:
-            continue
+class DataWrapper(FileWrapper):
+    def __init__(self, arcname, datum, ofs_endpoint):
+        self._arcname = arcname
+        self.uri = datum.uri
+        self.is_local = _is_local_ofs(ofs_endpoint, self.uri)
+        if self.is_local:
+            self.uri = self.uri.split('/')[-1]
 
-        zip_opts = {}
-        if arcname.endswith(".zip"):
-            zip_opts['compress_type'] = ZIP_DEFLATED
+    @property
+    def arcname(self):
+        return self._arcname
 
-        if _is_local_ofs(ofs_endpoint, datum.uri):
-            label = datum.uri.split('/')[-1]
-            stream = ofs.call('get_stream', label)
+    def get_stream(self):
+        if self.is_local:
+            stream = ofs.call('get_stream', self.uri)
         else:
             try:
-                stream = requests.get(datum.uri, stream=True).raw
+                stream = requests.get(self.uri, stream=True).raw
             except requests.exceptions.RequestException:
-                continue
+                return None
+        return stream
 
-        tfile = NamedTemporaryFile()
-        zfile._tfiles.append(tfile)
-        with closing(stream) as fobj:
-            copyfileobj(fobj, tfile)
-        tfile.seek(0)
-        zfile.write(tfile.name, arcname=arcname, **zip_opts)
-    try:
-        for chunk in zfile:
-            yield chunk
-    finally:
-        zfile.close()
-
-
-def _zip_max_size(data_arcnames, ofs_endpoint):
-    # 22 is the minimum size of a Zip EOCD
-    max_size = 22
-    for datum, arcname in data_arcnames:
-        if _is_local_ofs(ofs_endpoint, datum.uri):
-            label = datum.uri.split('/')[-1]
-            metadata = ofs.call('get_metadata', label)
+    def __len__(self):
+        if self.is_local:
+            metadata = ofs.call('get_metadata', self.uri)
             content_len = metadata['_content_length']
         else:
             try:
-                resp = requests.head(datum.uri)
+                resp = requests.head(self.uri)
             except requests.exceptions.RequestException:
                 content_len = 0
             else:
                 content_len = int(resp.headers.get('content-length', 0))
-
-        # https://en.wikipedia.org/wiki/Zip_(file_format)#File_headers
-        # 88 = local file header (30) + central directory file header (46) +
-        # possible data descriptor (12) + 
-        # (arcname + null byte string terminator)
-        # x2 once for the local header, once for the central directory
-        max_size += 88 + (len(arcname) + 1) * 2
-        max_size += content_len
-    return max_size
-
-
-zip_blueprint = Blueprint('zip', __name__, )
+        return content_len
 
 
 @zip_blueprint.route('{0}/zip'.format(api_v1_prefix), methods=['POST'])
 def zip():
     json = request.get_json()
-    data_arcnames = [(Data.query.get(did), arcname) for did, arcname in
-                     json['data_arcnames']]
     ofs_endpoint = json['ofs_endpoint']
+    wrappers = []
+    for did, arcname in json['data_arcnames']:
+        wrappers.append(
+            DataWrapper(arcname, Data.query.get(did), ofs_endpoint))
     fname = json['fname']
 
-    max_size = _zip_max_size(data_arcnames, ofs_endpoint)
-    response = Response(
-        stream_with_context(_zip_load(data_arcnames, ofs_endpoint)),
-        mimetype='application/zip')
+    szip = TempFileStreamingZipFile(wrappers)
+    max_size = szip.max_size()
+    response = Response(stream_with_context(iter(szip)),
+                        mimetype='application/zip')
     response.headers['Content-Disposition'] = \
         'attachment; filename={0}'.format(fname)
     response.headers['Content-Length'] = str(max_size)

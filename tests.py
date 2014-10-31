@@ -102,7 +102,8 @@ class TestUnit(BaseTest):
         self.assertEqual(headers['Content-Type'], 'text/plain')
 
     def test_zip_load(self):
-        zfile = server._zip_load([], '')
+        szip = server.TempFileStreamingZipFile([])
+        zfile = iter(szip)
         self.assertTrue(isinstance(zfile, types.GeneratorType))
         contents = zfile.next()
         self.assertEqual(len(contents), 22)
@@ -111,18 +112,20 @@ class TestUnit(BaseTest):
         data = 'http://999.0.0.0'
         ddd = Data(data, 'broken')
         arcname = 'namea'
-        zfile = server._zip_load([(ddd, arcname)], 'ofs')
+        szip = server.TempFileStreamingZipFile([server.DataWrapper(arcname, ddd, 'ofs')])
+        zfile = iter(szip)
         contents = zfile.next()
         self.assertEqual(len(contents), 22)
 
     def test_zip_max_size(self):
-        self.assertEqual(server._zip_max_size([], ''), 22)
+        szip = server.TempFileStreamingZipFile([])
+        self.assertEqual(szip.max_size(), 22)
 
         data = 'data:text/html,'
         ddd = Data(data, 'nameb')
         arcname = 'namea'
-        self.assertEqual(server._zip_max_size([(ddd, arcname)], 'ofs'),
-                         22 + 88 + (len(arcname) + 1) * 2)
+        szip = server.TempFileStreamingZipFile([server.DataWrapper(arcname, ddd, 'ofs')])
+        self.assertEqual(szip.max_size(), 22 + 88 + (len(arcname) + 1) * 2)
 
 
 class RoutedTest(BaseTest):
