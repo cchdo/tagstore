@@ -63,19 +63,23 @@ class QueryResponse(object):
         if preload:
             while self.page < self.num_pages:
                 self.page += 1
-                self.get_page(self.page)
+                # Some large number because fewer pages is better here
+                self.get_page(self.page, self.client.preload_page_num_results)
 
     @classmethod
     def query(cls, endpoint, client, params):
         return requests.get(client._api_endpoint(endpoint), params=params,
                             headers=client.headers_json)
 
-    def get_page(self, page=None):
+    def get_page(self, page=None, results_per_page=None):
         params = copy(self.params)
         if page is not None:
             if page > self.num_pages:
                 raise IndexError()
             params['page'] = page
+        if results_per_page is None:
+            results_per_page = self.client.results_per_page
+        params['results_per_page'] = results_per_page
 
         response = self.query(self.endpoint, self.client, params)
         ensure_response_status(response, 200)
@@ -118,8 +122,12 @@ class QueryResponse(object):
 class TagStoreClient(object):
     headers_json = {'Content-Type': 'application/json'}
 
-    def __init__(self, endpoint):
+    def __init__(self, endpoint, results_per_page=500,
+                 preload_page_num_results=1000):
         self.endpoint = endpoint
+
+        self.preload_page_num_results = preload_page_num_results
+        self.results_per_page = results_per_page
 
     def _api_endpoint(self, *segments):
         return '/'.join([self.endpoint] + map(unicode, segments))

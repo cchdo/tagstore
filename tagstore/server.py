@@ -302,6 +302,7 @@ def init_app(app):
 
     manager = APIManager(app, flask_sqlalchemy_db=db)
     manager.create_api(Data, url_prefix=api_v1_prefix,
+                       max_results_per_page=app.config['MAX_RESULTS_PER_PAGE_DATA'],
                        preprocessors={
                            'PATCH_SINGLE': [data_patch_single],
                            'POST': [data_post],
@@ -309,6 +310,7 @@ def init_app(app):
                        methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
                        allow_patch_many=True)
     manager.create_api(Tag, url_prefix=api_v1_prefix,
+                       max_results_per_page=app.config['MAX_RESULTS_PER_PAGE_TAG'],
                        preprocessors={
                            'PATCH_SINGLE': [TagPatchSingle.pre],
                            'DELETE': [tag_delete],
