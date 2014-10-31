@@ -1,7 +1,7 @@
 import os.path
 from sys import version_info
 
-from setuptools import setup, find_packages, Command
+from setuptools import setup, find_packages
 
 here = os.path.abspath(os.path.dirname(__file__))
 README = open(os.path.join(here, 'README.txt')).read()
@@ -17,13 +17,9 @@ requires = \
     _requires_framework
 
 
-extras_require = {
-}
-
-
 setup(
     name='tagstore',
-    version='0.1',
+    version='0.9',
     description='tagstore',
     long_description=README + '\n\n' +  CHANGES,
     classifiers=[
@@ -34,14 +30,10 @@ setup(
     ],
     author='CCHDO',
     author_email='cchdo@ucsd.edu',
-    url='',
+    url='https://bitbucket.org/ghdc/tagstore',
     keywords='web wsgi',
-    packages=find_packages(),
     include_package_data=True,
-    zip_safe=False,
+    packages=find_packages(),
     test_suite='tests',
     install_requires=requires,
-    extras_require=extras_require,
-    entry_points = {
-    }
 )
