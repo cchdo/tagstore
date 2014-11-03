@@ -22,17 +22,18 @@ from ofs.local import PTOFS
 
 from models import db, Tag, Data, tags
 from tempfilezipstream import TempFileStreamingZipFile, FileWrapper
-import patch.ptofs
+from patch.ptofs import patch_ptofs
 import patch.restless
-from patch.lockfile import RLockFile
+from patch.lockfile import RLockFile, lockpath
 
 
 class OFSWrapper(object):
     # 2-char bucket label for shallower pairtree
     BUCKET_LABEL = u'ts'
-    ofslock = RLockFile('.lock-ofs')
 
     def __init__(self, **kwargs):
+        self.ofslock = RLockFile(lockpath(
+            os.path.dirname(kwargs['storage_dir']), 'ofs'))
         self.init(**kwargs)
 
     def init(self, **kwargs):
@@ -43,6 +44,7 @@ class OFSWrapper(object):
         else:
             self.bucket_id = self.BUCKET_LABEL
         self.ofslock.release()
+        patch_ptofs(self.ofs.storage_dir)
 
     def call(self, method, *args, **kwargs):
         return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)

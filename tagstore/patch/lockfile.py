@@ -1,10 +1,15 @@
 import os
+import os.path
 from logging import getLogger, CRITICAL
 
 from zc.lockfile import LockFile, LockError
 
 
 getLogger('zc.lockfile').setLevel(CRITICAL)
+
+
+def lockpath(basepath, name):
+    return os.path.abspath(os.path.join(basepath, '.lock-{0}'.format(name)))
 
 
 class RLockFile(object):
