@@ -3,3 +3,4 @@ Flask-Restless
 ofs
 Pairtree
 zc.lockfile
+tempfilezipstream

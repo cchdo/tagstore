@@ -102,13 +102,6 @@ class TestUnit(BaseTest):
         self.assertEqual(headers['Content-Type'], 'text/plain')
 
     def test_zip_load(self):
-        szip = server.TempFileStreamingZipFile([])
-        zfile = iter(szip)
-        self.assertTrue(isinstance(zfile, types.GeneratorType))
-        contents = zfile.next()
-        self.assertEqual(len(contents), 22)
-        self.assertTrue(contents[:2], 'PK')
-
         data = 'http://999.0.0.0'
         ddd = Data(data, 'broken')
         arcname = 'namea'
@@ -118,9 +111,6 @@ class TestUnit(BaseTest):
         self.assertEqual(len(contents), 22)
 
     def test_zip_max_size(self):
-        szip = server.TempFileStreamingZipFile([])
-        self.assertEqual(szip.max_size(), 22)
-
         data = 'data:text/html,'
         ddd = Data(data, 'nameb')
         arcname = 'namea'
@@ -174,14 +164,16 @@ class TestViews(RoutedTest):
         uri = '{0}/{1}'.format(self.api_data_endpoint, response.json['id'])
         response = self.http('put', uri, data=json.dumps(data))
         self.assert_status(response, 200, 'Failed to edit data')
-        self.assertEqual(response.json['tags'][0]['tag'], tags[0]['tag'])
+        self.assertEqual(sorted(x['tag'] for x in response.json['tags']),
+                         sorted(x['tag'] for x in tags))
 
         tags = [{'tag': 'eee'}]
         data = {'uri': 'http://example.com', 'tags': tags}
         uri = '{0}/{1}'.format(self.api_data_endpoint, response.json['id'])
         response = self.http('put', uri, data=json.dumps(data))
         self.assert_status(response, 200, 'Failed to edit data')
-        self.assertEqual(response.json['tags'][0]['tag'], tags[0]['tag'])
+        self.assertEqual(sorted(x['tag'] for x in response.json['tags']),
+                         sorted(x['tag'] for x in tags))
 
     def test_data_query(self):
         filters = [dict(name='tags', op='any', val=dict(name='tag', op='eq', val='d'))]

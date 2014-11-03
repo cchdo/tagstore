@@ -12,6 +12,7 @@ _requires_framework = [
     'Flask',
     'Flask-Restless',
     'ofs',
+    'tempfilezipstream',
 ]
 requires = \
     _requires_framework
@@ -19,7 +20,7 @@ requires = \
 
 setup(
     name='tagstore',
-    version='0.9',
+    version='0.9.1',
     description='tagstore',
     long_description=README + '\n\n' +  CHANGES,
     classifiers=[
