@@ -194,12 +194,11 @@ def zip():
     fname = json['fname']
 
     szip = TempFileStreamingZipFile(wrappers)
-    max_size = szip.max_size()
     response = Response(stream_with_context(iter(szip)),
                         mimetype='application/zip')
     response.headers['Content-Disposition'] = \
         'attachment; filename={0}'.format(fname)
-    response.headers['Content-Length'] = str(max_size)
+    # no size can be given for the response because we can't know it in advance.
     return response
 
 
