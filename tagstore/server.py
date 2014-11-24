@@ -3,6 +3,7 @@ import os.path
 import logging
 from datetime import datetime, timedelta
 from mimetypes import guess_type
+from traceback import format_exc
 import json
 
 log = logging.getLogger(__name__)
@@ -47,7 +48,12 @@ class OFSWrapper(object):
         patch_ptofs(self.ofs.storage_dir)
 
     def call(self, method, *args, **kwargs):
-        return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
+        try:
+            return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
+        except Exception as exc:
+            log.error(u'{0} failed for {1}\n{2}'.format(
+                method, label, format_exc(err)))
+            raise
 
 
 def get_ofs():
@@ -247,17 +253,19 @@ def ofs_get(label):
         try:
             stream = ofs.call('get_stream', label)
         except Exception as err:
-            log.error(u'Local blob is missing for label {0}: {1!r}'.format(
-                label, err))
             abort(404)
         else:
-            metadata = ofs.call('get_metadata', label)
-            # Flask converts the filename to an absolute path by prepending the
-            # app directory which is incorrect. This is only used to add etags,
-            # so just turn that off.
-            resp = send_file(stream, add_etags=False)
-            _update_http_headers(resp.headers, metadata, as_attachment)
-            return resp
+            try:
+                metadata = ofs.call('get_metadata', label)
+            except Exception as err:
+                abort(500)
+            else:
+                # Flask converts the filename to an absolute path by prepending
+                # the app directory which is incorrect. This is only used to add
+                # etags, so just turn that off.
+                resp = send_file(stream, add_etags=False)
+                _update_http_headers(resp.headers, metadata, as_attachment)
+                return resp
     elif request.method == 'PUT':
         try:
             fname = request.form['fname']

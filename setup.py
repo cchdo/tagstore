@@ -12,7 +12,7 @@ _requires_framework = [
     'Flask',
     'Flask-Restless',
     'ofs',
-    'tempfilezipstream',
+    'tempfilezipstream>=2.0',
 ]
 requires = \
     _requires_framework
