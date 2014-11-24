@@ -20,7 +20,7 @@ requires = \
 
 setup(
     name='tagstore',
-    version='1.0',
+    version='1.1',
     description='tagstore',
     long_description=README + '\n\n' +  CHANGES,
     classifiers=[
