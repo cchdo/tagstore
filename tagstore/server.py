@@ -52,7 +52,7 @@ class OFSWrapper(object):
             return getattr(self.ofs, method)(self.bucket_id, *args, **kwargs)
         except Exception as exc:
             log.error(u'{0} failed for {1}\n{2}'.format(
-                method, label, format_exc(err)))
+                method, args, format_exc(exc)))
             raise
 
 

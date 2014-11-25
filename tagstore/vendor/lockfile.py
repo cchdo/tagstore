@@ -124,7 +124,6 @@ class TimeOutError(LockError):
     """The timeout interval elapsed before the lock succeeded."""
 
 
-
 class LockFile:
     """A portable way to lock resources by way of the file system.
 
